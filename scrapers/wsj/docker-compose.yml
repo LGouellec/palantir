@@ -1,0 +1,162 @@
+version: '3.8'
+
+services:
+  # Redis for distributed scraping
+  redis:
+    image: redis:7-alpine
+    container_name: wsj-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - wsj-network
+
+  proxy:
+    image: proxy
+    container_name: proxy
+    ports:
+      - "3128:3128"
+    networks:
+      - wsj-network
+
+  # Coordinator - discovers URLs and pushes to Redis
+  coordinator:
+    build: .
+    container_name: wsj-coordinator
+    environment:
+      POD_INDEX: 0
+      TOTAL_PODS: 4  # 1 coordinator + 3 workers
+      DISTRIBUTION: redis
+      HTTP_PROXY: "http://proxy:3128"
+      KAFKA_ENABLED: false
+      REDIS_URL: redis://redis:6379/0
+      BASE_URL: https://www.wsj.com/world
+      LIMIT: 30
+      DELAY: 2.0
+      VERBOSE: "true"
+    command: wsj_scraper_distributed.py --verbose
+    volumes:
+      - ./articles_docker/coordinator:/data/articles
+      - ./images/coordinator:/app/data/images
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - wsj-network
+
+  # Worker 1
+  worker1:
+    build: .
+    container_name: wsj-worker1
+    environment:
+      POD_INDEX: 1
+      TOTAL_PODS: 4
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_ENABLED: true
+      KAFKA_TOPIC: wsj-articles
+      DISTRIBUTION: redis
+      REDIS_URL: redis://redis:6379/0
+      DELAY: 2.0
+    command: wsj_scraper_distributed.py --verbose
+    depends_on:
+      - coordinator
+    networks:
+      - wsj-network
+
+  # Worker 2
+  worker2:
+    build: .
+    container_name: wsj-worker2
+    environment:
+      POD_INDEX: 2
+      TOTAL_PODS: 4
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_ENABLED: true
+      KAFKA_TOPIC: wsj-articles
+      DISTRIBUTION: redis
+      REDIS_URL: redis://redis:6379/0
+      DELAY: 2.0
+    command: wsj_scraper_distributed.py --verbose
+    depends_on:
+      - coordinator
+    networks:
+      - wsj-network
+
+  # Worker 3
+  worker3:
+    build: .
+    container_name: wsj-worker3
+    environment:
+      POD_INDEX: 3
+      TOTAL_PODS: 4
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_ENABLED: true
+      KAFKA_TOPIC: wsj-articles
+      DISTRIBUTION: redis
+      REDIS_URL: redis://redis:6379/0
+      DELAY: 2.0
+    command: wsj_scraper_distributed.py --verbose
+    depends_on:
+      - coordinator
+    networks:
+      - wsj-network
+
+  kafka:
+    image: confluentinc/cp-server:8.2.0
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    networks:
+      - wsj-network
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_METRIC_REPORTERS: io.confluent.telemetry.reporter.TelemetryReporter
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka:29092
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      CONFLUENT_METRICS_ENABLE: 'false'
+      CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
+      # Replace CLUSTER_ID with a unique base64 UUID using "bin/kafka-storage.sh random-uuid"
+      # See https://docs.confluent.io/kafka/operations-tools/kafka-tools.html#kafka-storage-sh
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_ENABLED: "false"
+      KAFKA_CONFLUENT_TELEMETRY_REMOTECONFIG_CONFLUENT_ENABLED: "false"
+      KAFKA_CONFLUENT_CONSUMER_LAG_EMITTER_ENABLED: "false"
+
+networks:
+  wsj-network:
+    driver: bridge
+
+# To run:
+# docker-compose up --build
+#
+# To scale workers:
+# docker-compose up --scale worker=5
+#
+# To view logs:
+# docker-compose logs -f coordinator
+# docker-compose logs -f worker1
+#
+# To stop:
+# docker-compose down

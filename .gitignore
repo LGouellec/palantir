@@ -1,0 +1,72 @@
+infra/
+kafka_config.properties
+TODO.md 
+
+# Output directories
+articles/
+output/
+scraped_articles/
+wsj_articles/
+scraped_history.json
+saved.json
+diff/
+
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+.cache/
+
+# Browser data (Camoufox/Selenium)
+.playwright/
+.camoufox/
+selenium-debug.log
+geckodriver.log
+chromedriver.log
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini

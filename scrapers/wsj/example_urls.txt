@@ -1,0 +1,52 @@
+# Example WSJ URLs for scraping with Scrapling
+# Lines starting with # are comments
+# Add article URLs (one per line) or section URLs
+
+# Usage:
+#   python wsj_scraper.py --urls-file example_urls.txt
+
+# ============================================================================
+# WSJ SECTION URLS
+# ============================================================================
+# Uncomment the sections you want to scrape:
+
+# Artificial Intelligence & Tech
+# https://www.wsj.com/tech/ai
+
+# Markets & Finance
+# https://www.wsj.com/markets
+
+# Technology (General)
+# https://www.wsj.com/tech
+
+# Economy
+# https://www.wsj.com/economy
+
+# Business
+# https://www.wsj.com/business
+
+# World News
+# https://www.wsj.com/world
+
+# Politics
+# https://www.wsj.com/politics
+
+# Personal Finance
+# https://www.wsj.com/personal-finance
+
+# Real Estate
+# https://www.wsj.com/real-estate
+
+# Life & Arts
+# https://www.wsj.com/life-arts
+
+# Opinion
+# https://www.wsj.com/opinion
+
+# ============================================================================
+# SPECIFIC ARTICLE URLS
+# ============================================================================
+# Add specific article URLs below (uncomment to use):
+
+# Example:
+# https://www.wsj.com/articles/example-article-url-here

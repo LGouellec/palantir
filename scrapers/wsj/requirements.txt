@@ -1,0 +1,16 @@
+# Main scraping framework (includes stealth mode & browser automation)
+scrapling[fetchers]>=0.4.7
+
+# Configuration file parsing
+pyyaml>=6.0
+
+# Optional: Redis for distributed scraping (queue mode)
+# Uncomment if using distributed Redis mode in Kubernetes
+redis>=5.0.0
+
+# Optional: Kafka for real-time article publishing
+# Uncomment if using Kafka integration
+confluent-kafka>=2.3.0
+
+# Alternative: Install everything
+# scrapling[all]>=0.2.0
