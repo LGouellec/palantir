@@ -346,8 +346,6 @@ class WSJScraper:
         #     page.goto(originalUrl)
         
         
-            
-
     def parse_cookie(self, cookie_str: str) -> dict:
         parts = [p.strip() for p in cookie_str.split(";")]
 
@@ -385,7 +383,6 @@ class WSJScraper:
 
         return result
                       
-
     def _parse_refer_parameter(self, url: str) -> str:
         parsed = urlparse(url)
         params = parse_qs(parsed.query)

@@ -7,6 +7,7 @@ Supports multiple distribution strategies for multi-pod deployments
 import os
 from time import sleep
 import hashlib
+import json
 from typing import List, Optional
 from pathlib import Path
 
@@ -19,7 +20,7 @@ class DistributedWSJScraper(WSJScraper):
 
     Distribution strategies:
     1. MODULO: URLs distributed by hash % total_pods
-    2. REDIS_QUEUE: URLs pushed to Redis queue, pods consume
+    2. KAFKA: URLs pushed to Kafka topic, pods consume via consumer groups
     3. RANGE: Manual URL range assignment
     """
 
@@ -28,7 +29,9 @@ class DistributedWSJScraper(WSJScraper):
         pod_index: int = 0,
         total_pods: int = 1,
         distribution_mode: str = 'modulo',
-        redis_url: Optional[str] = None,
+        kafka_urls_topic: Optional[str] = None,
+        kafka_urls_consumer_group: Optional[str] = None,
+        coordinator_pod: int = 0,
         **kwargs
     ):
         """
@@ -37,21 +40,27 @@ class DistributedWSJScraper(WSJScraper):
         Args:
             pod_index: Index of current pod (0-based)
             total_pods: Total number of pods in cluster
-            distribution_mode: 'modulo', 'redis', or 'range'
-            redis_url: Redis connection URL (for redis mode)
+            distribution_mode: 'modulo', 'kafka', or 'range'
+            kafka_urls_topic: Kafka topic for URL distribution (for kafka mode)
+            kafka_urls_consumer_group: Kafka consumer group for workers
             **kwargs: Arguments passed to WSJScraper
         """
         super().__init__(**kwargs)
 
         self.pod_index = pod_index
+        self.coordinator_pod = coordinator_pod
         self.total_pods = total_pods
         self.distribution_mode = distribution_mode.lower()
-        self.redis_url = redis_url
-        self.redis_client = None
+        self.kafka_urls_topic = kafka_urls_topic or 'wsj-urls'
+        self.kafka_urls_consumer_group = kafka_urls_consumer_group or 'wsj-scraper-workers'
 
-        # Initialize Redis if needed
-        if self.distribution_mode == 'redis' and redis_url:
-            self._init_redis()
+        # Kafka URL queue infrastructure
+        self.kafka_url_producer = None
+        self.kafka_url_consumer = None
+
+        # Initialize Kafka URL queue if needed
+        if self.distribution_mode == 'kafka':
+            self._init_kafka_url_queue()
 
         self.logger.info(
             f"Distributed scraper initialized: "
@@ -59,25 +68,44 @@ class DistributedWSJScraper(WSJScraper):
         )
         print(f"🚀 Pod {pod_index}/{total_pods} ready (mode: {distribution_mode})")
 
-    def _init_redis(self):
-        """Initialize Redis connection"""
+    def _init_kafka_url_queue(self):
+        """Initialize Kafka producer and consumer for URL distribution"""
         try:
-            import redis
-            self.redis_client = redis.from_url(
-                self.redis_url,
-                decode_responses=True
-            )
-            # Test connection
-            self.redis_client.ping()
-            self.logger.info(f"Redis connected: {self.redis_url}")
-            print(f"✅ Redis connected")
+            from confluent_kafka import Producer, Consumer, KafkaError
+            from kafka_config import load_kafka_config
+
+            # Load Kafka configuration
+            kafka_config = load_kafka_config()
+            base_config = kafka_config.get_producer_config()
+
+            # Initialize producer (for coordinator)
+            if self.pod_index == self.coordinator_pod:
+                producer_config = base_config.copy()
+                self.kafka_url_producer = Producer(producer_config)
+            else: # Initialize consumer (for workers)
+                consumer_config = base_config.copy()
+                consumer_config.update({
+                    'group.id': self.kafka_urls_consumer_group,
+                    'auto.offset.reset': 'earliest',
+                    'enable.auto.commit': True,
+                    'auto.commit.interval.ms': 5000,
+                })
+                self.kafka_url_consumer = Consumer(consumer_config)
+                self.kafka_url_consumer.subscribe([self.kafka_urls_topic])
+                self.logger.info(
+                    f"Kafka URL queue initialized: topic={self.kafka_urls_topic}, "
+                    f"group={self.kafka_urls_consumer_group}"
+                )
+            
+            self.logger.info(f"✅ Kafka URL queue connected: {self.kafka_urls_topic}")
+
         except ImportError:
             raise ImportError(
-                "Redis mode requires 'redis' package. "
-                "Install with: pip install redis"
+                "Kafka mode requires 'confluent-kafka' package. "
+                "Install with: pip install confluent-kafka"
             )
         except Exception as e:
-            self.logger.error(f"Redis connection failed: {e}")
+            self.logger.error(f"Kafka URL queue initialization failed: {e}")
             raise
 
     def _url_belongs_to_pod(self, url: str) -> bool:
@@ -100,34 +128,95 @@ class DistributedWSJScraper(WSJScraper):
             return filtered
         return urls
 
-    def _push_urls_to_redis(self, urls: List[str], queue_name: str = 'wsj:urls'):
-        """Push URLs to Redis queue (coordinator pod only)"""
-        if not self.redis_client:
-            raise RuntimeError("Redis not initialized")
+    def _push_urls_to_kafka(self, urls: List[str]) -> None:
+        """Push URLs to Kafka topic (coordinator pod only)"""
+        if not self.kafka_url_producer:
+            raise RuntimeError("Kafka URL producer not initialized")
 
-        # Push URLs to queue
+        def delivery_report(err, msg):
+            if err:
+                self.logger.error(f"URL delivery failed: {err}")
+            else:
+                self.logger.debug(
+                    f"URL delivered: partition={msg.partition()}, offset={msg.offset()}"
+                )
+
+        # Push URLs to topic
         for url in urls:
-            self.redis_client.rpush(queue_name, url)
+            message = json.dumps({'url': url}).encode('utf-8')
+            self.kafka_url_producer.produce(
+                topic=self.kafka_urls_topic,
+                key=url.encode('utf-8'),
+                value=message,
+                callback=delivery_report
+            )
+            self.kafka_url_producer.poll(0)
 
-        self.logger.info(f"Pushed {len(urls)} URLs to Redis queue: {queue_name}")
-        print(f"📤 Pushed {len(urls)} URLs to Redis queue")
+        # Flush to ensure all messages are sent
+        self.kafka_url_producer.flush()
 
-    def _get_url_from_redis(self, queue_name: str = 'wsj:urls', timeout: int = 5) -> Optional[str]:
-        """Get next URL from Redis queue (blocking with timeout)"""
-        if not self.redis_client:
-            raise RuntimeError("Redis not initialized")
+        self.logger.info(f"Pushed {len(urls)} URLs to Kafka topic: {self.kafka_urls_topic}")
+        print(f"📤 Pushed {len(urls)} URLs to Kafka topic: {self.kafka_urls_topic}")
 
-        result = self.redis_client.blpop(queue_name, timeout=timeout)
-        if result:
-            _, url = result
+    def _get_url_from_kafka(self, timeout: float = 5.0) -> Optional[str]:
+        """Get next URL from Kafka topic (using consumer group protocol)"""
+        if not self.kafka_url_consumer:
+            raise RuntimeError("Kafka URL consumer not initialized")
+
+        try:
+            msg = self.kafka_url_consumer.poll(timeout=timeout)
+
+            if msg is None:
+                return None
+
+            if msg.error():
+                from confluent_kafka import KafkaError
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    self.logger.debug(f"Reached end of partition {msg.partition()}")
+                    return None
+                else:
+                    self.logger.error(f"Consumer error: {msg.error()}")
+                    return None
+
+            # Parse message
+            data = json.loads(msg.value().decode('utf-8'))
+            url = data.get('url')
+
+            self.logger.debug(
+                f"Consumed URL from partition {msg.partition()}, offset {msg.offset()}"
+            )
             return url
-        return None
+
+        except Exception as e:
+            self.logger.error(f"Error consuming URL from Kafka: {e}")
+            return None
+
+    def close(self) -> None:
+        """Cleanup resources (Kafka producers/consumers, etc.)"""
+        # Close parent resources (article Kafka producer)
+        super().close()
+
+        # Close URL queue resources
+        if self.kafka_url_producer:
+            try:
+                remaining = self.kafka_url_producer.flush(timeout=10.0)
+                if remaining > 0:
+                    self.logger.warning(f"{remaining} URL messages were not delivered")
+                self.logger.info("Kafka URL producer closed")
+            except Exception as e:
+                self.logger.error(f"Error closing Kafka URL producer: {e}")
+
+        if self.kafka_url_consumer:
+            try:
+                self.kafka_url_consumer.close()
+                self.logger.info("Kafka URL consumer closed")
+            except Exception as e:
+                self.logger.error(f"Error closing Kafka URL consumer: {e}")
 
     def get_article_links_distributed(
         self,
         url: str = None,
         limit: int = 20,
-        coordinator_pod: int = 0,
         enable_pagination: bool = True
     ) -> List[str]:
         """
@@ -136,24 +225,23 @@ class DistributedWSJScraper(WSJScraper):
         Args:
             url: URL to scrape links from
             limit: Max number of links to discover
-            coordinator_pod: Which pod discovers links (others wait for Redis)
             enable_pagination: Enable automatic pagination
 
         Returns:
             List of URLs assigned to this pod
         """
 
-        if self.distribution_mode == 'redis':
-            # Redis mode: coordinator discovers, others consume from queue
-            if self.pod_index == coordinator_pod:
-                # Coordinator: discover and push to Redis
+        if self.distribution_mode == 'kafka':
+            # Kafka mode: coordinator discovers, others consume from topic
+            if self.pod_index == self.coordinator_pod:
+                # Coordinator: discover and push to Kafka
                 print(f"🔍 Coordinator pod {self.pod_index}: discovering URLs...")
                 all_urls = self.get_article_links(url, limit, enable_pagination=enable_pagination)
-                self._push_urls_to_redis(all_urls)
+                self._push_urls_to_kafka(all_urls)
                 return []  # Coordinator doesn't scrape
             else:
-                # Worker: wait for URLs in queue
-                print(f"⏳ Worker pod {self.pod_index}: waiting for URLs from Redis...")
+                # Worker: wait for URLs in topic
+                print(f"⏳ Worker pod {self.pod_index}: waiting for URLs from Kafka...")
                 return []  # URLs consumed in scrape_and_save_distributed
 
         elif self.distribution_mode == 'modulo':
@@ -166,7 +254,8 @@ class DistributedWSJScraper(WSJScraper):
             # Range mode: manual assignment
             return self.get_article_links(url, limit, enable_pagination=enable_pagination)
 
-    def push_urls_to_redis(self, urls: List[str], redis_queue: str) -> None:
+    def push_urls_to_kafka_queue(self, urls: List[str]) -> None:
+        """Filter and push URLs to Kafka topic"""
         original_count = len(urls)
         all_urls = [url for url in urls if not self._is_already_scraped(url)]
         skipped_count = original_count - len(all_urls)
@@ -175,9 +264,9 @@ class DistributedWSJScraper(WSJScraper):
             print(f"⏭️  Skipping {skipped_count} already scraped article(s)")
             self.logger.info(f"Skipped {skipped_count} already scraped articles")
 
-        # Push all URLs to Redis
-        print(f"📤 Coordinator: pushing {len(all_urls)} unique URLs to Redis...")
-        self._push_urls_to_redis(all_urls, redis_queue)
+        # Push all URLs to Kafka
+        print(f"📤 Coordinator: pushing {len(all_urls)} unique URLs to Kafka...")
+        self._push_urls_to_kafka(all_urls)
         print(f"✅ Coordinator pod {self.pod_index}: URLs pushed.")
 
         for url in all_urls:
@@ -193,9 +282,7 @@ class DistributedWSJScraper(WSJScraper):
         force: bool = False,
         save_local: bool = False,
         enable_pagination: bool = True,
-        auto_discovery: bool = True,
-        coordinator_pod: int = 0,
-        redis_queue: str = 'wsj:urls'
+        auto_discovery: bool = True
     ) -> None:
         """
         Distributed scraping with automatic URL distribution
@@ -209,29 +296,27 @@ class DistributedWSJScraper(WSJScraper):
             save_local: Force local file save even if Kafka is enabled
             enable_pagination: Enable automatic pagination
             auto_discovery: Automatically discover articles from base_url (default: True)
-            coordinator_pod: Pod index that coordinates (for redis mode)
-            redis_queue: Redis queue name
         """
 
         self.logger.info(
             f"Starting distributed scrape: pod={self.pod_index}, mode={self.distribution_mode}"
         )
 
-        # Redis mode: special handling for coordinator + workers
-        if self.distribution_mode == 'redis':
-            if self.pod_index == coordinator_pod:
+        # Kafka mode: special handling for coordinator + workers
+        if self.distribution_mode == 'kafka':
+            if self.pod_index == self.coordinator_pod:
                 while True:
                     # Coordinator: discover URLs (if auto-discovery enabled)
                     if auto_discovery:
 
                         print(f"🔍 Coordinator pod {self.pod_index}: discovering URLs...")
                         discovered_urls = self.get_article_links(limit=limit, enable_pagination=enable_pagination)
-                        self.push_urls_to_redis(discovered_urls, redis_queue)
+                        self.push_urls_to_kafka_queue(discovered_urls)
 
-                        if article_urls: 
+                        if article_urls:
                             for url in article_urls:
                                 all_section_urls = self.get_article_links(url, limit, enable_pagination=enable_pagination)
-                                self.push_urls_to_redis(all_section_urls, redis_queue)
+                                self.push_urls_to_kafka_queue(all_section_urls)
                     else:
                         # No auto-discovery, use only provided URLs
                         if not article_urls:
@@ -239,7 +324,7 @@ class DistributedWSJScraper(WSJScraper):
                             return
                         print(f"📝 Coordinator: Using {len(article_urls)} provided URLs (auto-discovery disabled)")
                         all_urls = article_urls
-                        self.push_urls_to_redis(all_urls, redis_queue)
+                        self.push_urls_to_kafka_queue(all_urls)
 
                     print(f"⏰ Sleeping 10 minutes before restarting the coordinator")
                     sleep(600)
@@ -253,7 +338,6 @@ class DistributedWSJScraper(WSJScraper):
                 print(f"🔍 Pod {self.pod_index}: discovering URLs...")
                 discovered_urls = self.get_article_links_distributed(
                     limit=limit,
-                    coordinator_pod=coordinator_pod,
                     enable_pagination=enable_pagination
                 )
 
@@ -289,19 +373,20 @@ class DistributedWSJScraper(WSJScraper):
                 print(f"⏭️  Skipping {skipped_count} already scraped article(s)")
                 self.logger.info(f"Skipped {skipped_count} already scraped articles")
 
-        # Redis mode workers: consume from queue
-        if self.distribution_mode == 'redis':
-            # Workers only (coordinator already exited above)
-            print(f"🔄 Worker pod {self.pod_index}: consuming from Redis queue...")
+        # Kafka mode workers: consume from topic
+        if self.distribution_mode == 'kafka':
+            # Workers only (coordinator already done above)
+            print(f"🔄 Worker pod {self.pod_index}: consuming from Kafka topic...")
             scraped_count = 0
 
             while True:
-                url = self._get_url_from_redis(redis_queue, timeout=5)
+                url = self._get_url_from_kafka(timeout=5.0)
 
                 if url is None:
-                    # No more URLs in queue
-                    print(f"📭 No more URLs in queue. Pod {self.pod_index} will sleep 30 seconds and retry.")
-                    self.kafka_producer.flush()
+                    # No more URLs in topic
+                    print(f"📭 No URLs available. Pod {self.pod_index} will sleep 30 seconds and retry.")
+                    if self.kafka_enabled:
+                        self.kafka_producer.flush()
                     sleep(30)
                     continue
 
@@ -373,14 +458,15 @@ def main():
         epilog="""
 Distribution Modes:
   modulo: Each pod gets URLs by hash % total_pods (all pods discover)
-  redis:  Coordinator discovers, workers consume from Redis queue
+  kafka:  Coordinator discovers, workers consume from Kafka topic via consumer groups
   range:  Manual URL range assignment
 
 Environment Variables (for K8s):
-  POD_INDEX:      Index of current pod (0-based)
-  TOTAL_PODS:     Total number of pods
-  REDIS_URL:      Redis connection URL
-  DISTRIBUTION:   Distribution mode (modulo/redis/range)
+  POD_INDEX:             Index of current pod (0-based)
+  TOTAL_PODS:            Total number of pods
+  DISTRIBUTION:          Distribution mode (modulo/kafka/range)
+  KAFKA_URLS_TOPIC:      Kafka topic for URL distribution
+  KAFKA_URLS_GROUP:      Kafka consumer group for workers
 
 Examples:
   # Modulo mode (3 pods)
@@ -388,10 +474,10 @@ Examples:
   POD_INDEX=1 TOTAL_PODS=3 python %(prog)s --mode modulo --limit 30
   POD_INDEX=2 TOTAL_PODS=3 python %(prog)s --mode modulo --limit 30
 
-  # Redis mode (coordinator + 2 workers)
-  POD_INDEX=0 TOTAL_PODS=3 python %(prog)s --mode redis --limit 30  # Coordinator
-  POD_INDEX=1 TOTAL_PODS=3 python %(prog)s --mode redis             # Worker
-  POD_INDEX=2 TOTAL_PODS=3 python %(prog)s --mode redis             # Worker
+  # Kafka mode (coordinator + 2 workers)
+  POD_INDEX=0 TOTAL_PODS=3 python %(prog)s --mode kafka --limit 30  # Coordinator
+  POD_INDEX=1 TOTAL_PODS=3 python %(prog)s --mode kafka             # Worker
+  POD_INDEX=2 TOTAL_PODS=3 python %(prog)s --mode kafka             # Worker
         """
     )
 
@@ -404,15 +490,16 @@ Examples:
                        help='Total pods (default: TOTAL_PODS env or 1)')
     parser.add_argument('--mode', '--distribution-mode',
                        default=os.getenv('DISTRIBUTION', 'modulo'),
-                       choices=['modulo', 'redis', 'range'],
+                       choices=['modulo', 'kafka', 'range'],
                        help='Distribution mode (default: modulo)')
-    parser.add_argument('--redis-url',
-                       default=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
-                       help='Redis URL (default: REDIS_URL env or localhost)')
+    parser.add_argument('--kafka-urls-topic',
+                       default=os.getenv('KAFKA_URLS_TOPIC', 'wsj-urls'),
+                       help='Kafka topic for URL distribution (default: KAFKA_URLS_TOPIC env or wsj-urls)')
+    parser.add_argument('--kafka-urls-consumer-group',
+                       default=os.getenv('KAFKA_URLS_GROUP', 'wsj-scraper-workers'),
+                       help='Kafka consumer group for workers (default: KAFKA_URLS_GROUP env or wsj-scraper-workers)')
     parser.add_argument('--coordinator-pod', type=int, default=0,
-                       help='Coordinator pod index (redis mode, default: 0)')
-    parser.add_argument('--redis-queue', default='wsj:urls',
-                       help='Redis queue name (default: wsj:urls)')
+                       help='Coordinator pod index (kafka mode, default: 0)')
 
     # Standard scraper options
     parser.add_argument('--output-dir', '-o', default='articles',
@@ -481,7 +568,8 @@ Examples:
         pod_index=args.pod_index,
         total_pods=args.total_pods,
         distribution_mode=args.mode,
-        redis_url=args.redis_url if args.mode == 'redis' else None,
+        kafka_urls_topic=args.kafka_urls_topic if args.mode == 'kafka' else None,
+        kafka_urls_consumer_group=args.kafka_urls_consumer_group if args.mode == 'kafka' else None,
         output_dir=args.output_dir,
         headless=not args.no_headless,
         verbose=args.verbose,
@@ -490,7 +578,8 @@ Examples:
         kafka_enabled=args.kafka_enabled,
         kafka_bootstrap_servers=args.kafka_bootstrap_servers,
         kafka_topic=args.kafka_topic,
-        kafka_config_file=args.kafka_config
+        kafka_config_file=args.kafka_config,
+        coordinator_pod=args.coordinator_pod
     )
 
     # Run distributed scraping
@@ -502,9 +591,7 @@ Examples:
         force=args.force,
         save_local=args.save_local,
         enable_pagination=not args.no_pagination,
-        auto_discovery=not args.no_auto_discovery,
-        coordinator_pod=args.coordinator_pod,
-        redis_queue=args.redis_queue
+        auto_discovery=not args.no_auto_discovery
     )
 
 

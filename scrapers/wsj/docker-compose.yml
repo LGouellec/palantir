@@ -1,28 +1,6 @@
 version: '3.8'
 
 services:
-  # Redis for distributed scraping
-  redis:
-    image: redis:7-alpine
-    container_name: wsj-redis
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    networks:
-      - wsj-network
-
-  proxy:
-    image: proxy
-    container_name: proxy
-    ports:
-      - "3128:3128"
-    networks:
-      - wsj-network
-
   # Coordinator - discovers URLs and pushes to Redis
   coordinator:
     build: .
@@ -30,9 +8,9 @@ services:
     environment:
       POD_INDEX: 0
       TOTAL_PODS: 4  # 1 coordinator + 3 workers
-      DISTRIBUTION: redis
-      HTTP_PROXY: "http://proxy:3128"
-      KAFKA_ENABLED: false
+      DISTRIBUTION: kafka
+      KAFKA_ENABLED: true
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       REDIS_URL: redis://redis:6379/0
       BASE_URL: https://www.wsj.com/world
       LIMIT: 30
@@ -43,8 +21,7 @@ services:
       - ./articles_docker/coordinator:/data/articles
       - ./images/coordinator:/app/data/images
     depends_on:
-      redis:
-        condition: service_healthy
+      - kafka
     networks:
       - wsj-network
 

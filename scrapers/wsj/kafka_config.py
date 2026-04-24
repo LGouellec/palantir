@@ -50,7 +50,7 @@ class KafkaConfig:
     def _set_defaults(self):
         """Set default configuration"""
         self._config = {
-            'bootstrap.servers': f'{self.bootstrap_servers()}'
+            'bootstrap.servers': f'{self.bootstrap_servers}'
         }
 
     @property
