@@ -851,7 +851,8 @@ class WSJScraper:
         while retry == True:
             response = StealthyFetcher.fetch(
                         url,
-                        timeout=30000,
+                        retries=10,
+                        timeout=60000,
                         proxy=proxy,
                         user_data_dir="./chrome",
                         headless=self.headless,
