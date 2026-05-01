@@ -1,9 +1,9 @@
-version: '3.8'
-
 services:
   # Coordinator - discovers URLs and pushes to Redis
   coordinator:
-    build: .
+    build:
+      context: ./wsj
+      dockerfile: Dockerfile
     container_name: wsj-coordinator
     environment:
       POD_INDEX: 0
@@ -11,23 +11,26 @@ services:
       DISTRIBUTION: kafka
       KAFKA_ENABLED: true
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      REDIS_URL: redis://redis:6379/0
       BASE_URL: https://www.wsj.com/world
       LIMIT: 30
       DELAY: 2.0
       VERBOSE: "true"
     command: wsj_scraper_distributed.py --verbose
     volumes:
-      - ./articles_docker/coordinator:/data/articles
       - ./images/coordinator:/app/data/images
     depends_on:
-      - kafka
+      proxy:
+        condition: service_started
+      kafka:
+        condition: service_started
     networks:
-      - wsj-network
+      - scraper-network
 
   # Worker 1
   worker1:
-    build: .
+    build:
+      context: ./wsj
+      dockerfile: Dockerfile
     container_name: wsj-worker1
     environment:
       POD_INDEX: 1
@@ -35,18 +38,22 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_ENABLED: true
       KAFKA_TOPIC: wsj-articles
-      DISTRIBUTION: redis
-      REDIS_URL: redis://redis:6379/0
+      DISTRIBUTION: kafka
       DELAY: 2.0
     command: wsj_scraper_distributed.py --verbose
     depends_on:
-      - coordinator
+      proxy:
+        condition: service_started
+      kafka:
+        condition: service_started
     networks:
-      - wsj-network
+      - scraper-network
 
   # Worker 2
   worker2:
-    build: .
+    build:
+      context: ./wsj
+      dockerfile: Dockerfile
     container_name: wsj-worker2
     environment:
       POD_INDEX: 2
@@ -54,18 +61,22 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_ENABLED: true
       KAFKA_TOPIC: wsj-articles
-      DISTRIBUTION: redis
-      REDIS_URL: redis://redis:6379/0
+      DISTRIBUTION: kafka
       DELAY: 2.0
     command: wsj_scraper_distributed.py --verbose
     depends_on:
-      - coordinator
+      proxy:
+        condition: service_started
+      kafka:
+        condition: service_started
     networks:
-      - wsj-network
+      - scraper-network
 
   # Worker 3
   worker3:
-    build: .
+    build:
+      context: ./wsj
+      dockerfile: Dockerfile
     container_name: wsj-worker3
     environment:
       POD_INDEX: 3
@@ -73,14 +84,16 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_ENABLED: true
       KAFKA_TOPIC: wsj-articles
-      DISTRIBUTION: redis
-      REDIS_URL: redis://redis:6379/0
+      DISTRIBUTION: kafka
       DELAY: 2.0
     command: wsj_scraper_distributed.py --verbose
     depends_on:
-      - coordinator
+      proxy:
+        condition: service_started
+      kafka:
+        condition: service_started
     networks:
-      - wsj-network
+      - scraper-network
 
   kafka:
     image: confluentinc/cp-server:8.2.0
@@ -90,7 +103,7 @@ services:
       - "9092:9092"
       - "9101:9101"
     networks:
-      - wsj-network
+      - scraper-network
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
@@ -122,18 +135,5 @@ services:
       KAFKA_CONFLUENT_CONSUMER_LAG_EMITTER_ENABLED: "false"
 
 networks:
-  wsj-network:
+  scraper-network:
     driver: bridge
-
-# To run:
-# docker-compose up --build
-#
-# To scale workers:
-# docker-compose up --scale worker=5
-#
-# To view logs:
-# docker-compose logs -f coordinator
-# docker-compose logs -f worker1
-#
-# To stop:
-# docker-compose down

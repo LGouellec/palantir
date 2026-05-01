@@ -1,6 +1,7 @@
 infra/
 kafka_config.properties
 TODO.md 
+chrome/
 
 # Output directories
 articles/

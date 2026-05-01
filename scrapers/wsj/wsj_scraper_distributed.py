@@ -72,16 +72,14 @@ class DistributedWSJScraper(WSJScraper):
         """Initialize Kafka producer and consumer for URL distribution"""
         try:
             from confluent_kafka import Producer, Consumer, KafkaError
-            from kafka_config import load_kafka_config
 
-            # Load Kafka configuration
-            kafka_config = load_kafka_config()
-            base_config = kafka_config.get_producer_config()
+            base_config = self.kafka_config.get_kafka_config()
 
             # Initialize producer (for coordinator)
             if self.pod_index == self.coordinator_pod:
                 producer_config = base_config.copy()
                 self.kafka_url_producer = Producer(producer_config)
+                self.logger.info(f"[Kafka for URL Queue] - Kafka producer initialized and connected to : {producer_config['bootstrap.servers']}")
             else: # Initialize consumer (for workers)
                 consumer_config = base_config.copy()
                 consumer_config.update({
@@ -96,8 +94,9 @@ class DistributedWSJScraper(WSJScraper):
                     f"Kafka URL queue initialized: topic={self.kafka_urls_topic}, "
                     f"group={self.kafka_urls_consumer_group}"
                 )
-            
-            self.logger.info(f"✅ Kafka URL queue connected: {self.kafka_urls_topic}")
+                self.logger.info(f"[Kafka for URL Queue] - Kafka Consumer initialized and connected to : {consumer_config['bootstrap.servers']}")
+
+            self.logger.info(f"✅ [Kafka for URL Queue] connected: {self.kafka_urls_topic}")
 
         except ImportError:
             raise ImportError(
@@ -272,7 +271,6 @@ class DistributedWSJScraper(WSJScraper):
         for url in all_urls:
             self._mark_as_scraped(url)
         
-
     def scrape_and_save_distributed(
         self,
         article_urls: List[str] = None,

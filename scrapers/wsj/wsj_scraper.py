@@ -6,15 +6,16 @@ Uses Scrapling - adaptive web scraping framework with built-in stealth mode
 
 import json
 import re
-from urllib.parse import urlparse, parse_qs
 import time
 import logging
+import random
 from time import sleep
 import os
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
-
+from stt.audio_transcriber import AudioTranscriber
+from mouvement.human import HumanMouseSimulator
 from playwright.sync_api import Page
 from scrapling.fetchers import StealthyFetcher
 from kafka_config import load_kafka_config, KafkaConfig
@@ -58,7 +59,6 @@ class WSJScraper:
             self.kafka_bootstrap_servers = self.kafka_config.bootstrap_servers
         else:
             self.kafka_bootstrap_servers = kafka_bootstrap_servers
-            self.kafka_topic = kafka_topic
 
         self.kafka_topic = kafka_topic
         self.kafka_producer = None
@@ -79,6 +79,8 @@ class WSJScraper:
             self.logger = logging.getLogger('WSJScraper')
             self.logger.setLevel(logging.WARNING)
 
+        self.audio_transcribe = AudioTranscriber(self.logger)
+        
         # Initialize Kafka producer if enabled
         if kafka_enabled:
             self._init_kafka()
@@ -127,9 +129,8 @@ class WSJScraper:
 
             # Use configuration from file if available, otherwise use defaults
             if self.kafka_config:
-                conf = self.kafka_config.get_producer_config()
-                if self.kafka_config:
-                    print(f"📋 Using Kafka config from {self.kafka_config.config_file}")
+                conf = self.kafka_config.get_kafka_config()                
+                self.logger.info(f"📋 Using Kafka config from {self.kafka_config.config_file}")
             else:
                 # Default Confluent Kafka configuration
                 conf = {
@@ -143,9 +144,7 @@ class WSJScraper:
 
             self.logger.debug(conf);
             self.kafka_producer = Producer(conf)
-
-            self.logger.info(f"Kafka producer initialized: {self.kafka_bootstrap_servers}")
-            print(f"📡 Kafka producer connected to {self.kafka_bootstrap_servers}")
+            self.logger.info(f"Kafka producer initialized and connected to : {conf['bootstrap.servers']}")
 
         except ImportError:
             raise ImportError(
@@ -252,12 +251,16 @@ class WSJScraper:
             except Exception as e:
                 self.logger.error(f"Error closing Kafka producer: {e}")
 
+    def load_tracking_mouse(self, page:Page):
+        self.simulator = HumanMouseSimulator(page, self.logger)
+        self.simulator.enable_mouse_tracking()
+
     def by_pass_captcha(self, page:Page):
-        # page.on("response", lambda response: print("<<", response.status, response.url[:50], response.body()))
-        # page.reload()
-        # page.pause()
+
         status = page.evaluate("() => navigator.webdriver");
         self.logger.info(f"Webdriver used : {status}")
+
+        page.wait_for_load_state("domcontentloaded")
 
         if page.locator('div.css-jzm21u-MastHeadContainer.e1mkna771').count() > 0:
             self.logger.info("Skip captcha bypass ...")
@@ -268,126 +271,46 @@ class WSJScraper:
 
         framelocator = page.locator('iframe').content_frame
 
-        if framelocator.locator('#ddv1-captcha-container').count() > 0:
+        if HumanMouseSimulator.wait_for_frame_selector(framelocator, '#ddv1-captcha-container'):
             page.screenshot(path=f'./data/images/screenshot-iframe.png', full_page=True)
-            framelocator.locator('#captcha__audio__button').click()
-            sleep(0.5)
-            framelocator.locator('#captcha__puzzle__button').click()
+            n = random.random()
+            # 80% audio, 20% slider resolver
+            if n < 0.80: # Try resolving audio captcha
+                self.logger.info(f'Trying resolving audio captcha')
 
-            start = framelocator.locator('#captcha__frame__bottom > div.sliderContainer > div.slider');
-            end = framelocator.locator('#captcha__frame__bottom > div.sliderContainer > div.sliderTarget');
+                def fill_func(index:int, value:int, typing_speed:float):
+                    selector = f'#captcha__audio > div.audio-captcha-input-container > input:nth-child({index+1})'
+                    locator = framelocator.locator(selector)
+                    self.simulator.move_and_type(locator, str(value), delay=int(typing_speed * 1000))
 
-            start.hover(force=True)
-            page.mouse.down()
-            sleep(0.3)
-            end.hover(force=True)
-            page.mouse.up()
-            sleep(1)
-            page.screenshot(path=f'./data/images/screenshot-iframe-after.png', full_page=True)
-            sleep(2)
-            
+                self.simulator.click(framelocator.locator('#captcha__audio__button'))
+
+                audioSrc = framelocator.locator('#captcha__audio > audio').get_attribute('src');
+                self.logger.info(f"Downloading audio captcha from : {audioSrc}")
+                transcription_result = self.audio_transcribe.transcribe_audio(audioSrc)
+
+                # click on play audio
+                framelocator.locator('#captcha__audio > div.audio-captcha-play-container > button').click()
+                self.logger.info(f'Transcription captcha detected : {transcription_result.full_text}')
+                self.simulator.simulate_human_typing(transcription_result.sequences, fill_func)
+
+                self.simulator.click(framelocator.locator('#captcha__audio > div.audio-captcha-submit-container > button'))
+            else:
+                self.logger.info(f'Trying resolving slider captcha')
+                self.simulator.click(framelocator.locator('#captcha__puzzle__button'))
+
+                start = framelocator.locator('#captcha__frame__bottom > div.sliderContainer > div.slider');
+                end = framelocator.locator('#captcha__frame__bottom > div.sliderContainer > div.sliderTarget');
+
+                self.simulator.drag_slider(start, end)
+
+        page.screenshot(path=f'./data/images/screenshot-iframe-after.png', full_page=True)
+        sleep(2)    
         page.screenshot(path=f'./data/images/screenshot-iframe-after2.png', full_page=True)
-        with open("./data/page.html", "w") as file:
-            file.write(page.content())
 
         page.wait_for_selector('div.css-jzm21u-MastHeadContainer.e1mkna771')
-        page.screenshot(path=f'./data/images/screenshot-final.png', full_page=True)
-        
-
-        #iframe_element = page.locator('iframe').first
-        #iframe_src = iframe_element.get_attribute("src")
-        #print(f"Iframe Source: {iframe_src}")
-        #response = page.goto(iframe_src, referer=self._parse_refer_parameter(iframe_src))
-
-        #page.on("request", lambda request: print(">>", request.method, response.url[:50]))
-        #page.on("response", lambda response: print("<<", response.status, response.url[:50], response.body()))
-        # page.pause()
-        
-
-        # if page.locator('#ddv1-captcha-container').count() > 0:
-        #     with page.expect_response("**/captcha/check**") as response_info:
-        #         page.locator('#captcha__audio__button').click()
-        #         sleep(0.5)
-        #         page.locator('#captcha__puzzle__button').click()
-
-        #         start = page.locator('#captcha__frame__bottom > div.sliderContainer > div.slider');
-        #         end = page.locator('#captcha__frame__bottom > div.sliderContainer > div.sliderTarget');
-
-        #         start.hover(force=True)
-        #         page.mouse.down()
-        #         sleep(0.3)
-        #         end.hover(force=True)
-        #         page.mouse.up()
-        #         sleep(1)
-
-        #         page.screenshot(path=f'./data/images/screenshot-after-simulation.png', full_page=True)
-        #         sleep(2)
-        #         page.screenshot(path=f'./data/images/screenshot-result-simulation.png', full_page=True)
-        #         response = response_info.value
-
-        #         if response.header_value("Content-Type") == "application/json;charset=utf-8":
-        #             body = response.json()
-        #             print(f"Cookie value : {body}")
-        #             context = page.context
-        #             cookieValue = self.parse_cookie(body["cookie"])
-                    
-        #             context.add_cookies([{
-        #                 'name': cookieValue["key"],
-        #                 'value': cookieValue["value"],
-        #                 'secure': cookieValue["secure"],
-        #                 'domain': cookieValue["domain"],
-        #                 'expires': -1,
-        #                 'path': cookieValue["path"],
-        #                 'sameSite': cookieValue["samesite"]
-        #             }])
-        #             page.goto(originalUrl)
-        #             print(context.cookies())                
-        # else:
-        #     page.goto(originalUrl)
-        
-        
-    def parse_cookie(self, cookie_str: str) -> dict:
-        parts = [p.strip() for p in cookie_str.split(";")]
-
-        result = {
-            "key": None,
-            "value": None,
-            "max_age": None,
-            "domain": None,
-            "path": None,
-            "secure": False,
-            "samesite": None
-        }
-
-        if "=" in parts[0]:
-            key, value = parts[0].split("=", 1)
-            result["key"] = key
-            result["value"] = value
-
-        for part in parts[1:]:
-            if "=" in part:
-                k, v = part.split("=", 1)
-                k = k.lower()
-                if k == "max-age":
-                    result["max_age"] = float(v)
-                elif k == "domain":
-                    result["domain"] = v
-                elif k == "path":
-                    result["path"] = v
-                elif k == "samesite":
-                    result["samesite"] = v
-            else:
-                # Attributs sans valeur (ex: Secure)
-                if part.lower() == "secure":
-                    result["secure"] = True
-
-        return result
-                      
-    def _parse_refer_parameter(self, url: str) -> str:
-        parsed = urlparse(url)
-        params = parse_qs(parsed.query)
-        referer = params.get("referer", [None])[0]
-        return referer
+        page.screenshot(path=f'./data/images/screenshot-final.png', full_page=True)        
+        self.simulator.reset_position()
 
     def get_article_links(self, url: str = None, limit: int = 20, enable_pagination: bool = True) -> List[str]:
         """
@@ -923,23 +846,23 @@ class WSJScraper:
 
     def fetch(self, url: str = None) -> Response:
         retry = True
-        proxy = os.getenv('HTTP_PROXY')
+        proxy = os.getenv('HTTP_PROXY', None)
         self.logger.info(f"Using HTTP Proxy {proxy}")
         while retry == True:
             response = StealthyFetcher.fetch(
                         url,
+                        timeout=30000,
                         proxy=proxy,
+                        user_data_dir="./chrome",
                         headless=self.headless,
                         network_idle=True,
                         google_search=False,
-                        humanize=False,
-                        geoip=False,
-                        allow_webgl=False,
+                        load_dom=True,
+                        allow_webgl=True,
                         hide_canvas=True,
-                        os_randomize=True,
-                        solve_cloudflare=False,
-                        page_action=self.by_pass_captcha
-                    )
+                        disable_resources=False,
+                        page_action=self.by_pass_captcha,
+                        page_setup=self.load_tracking_mouse)
             if response.status == 401:
                 # captcha enabled, need to retry
                 print(f"Retry fetching {url} due captcha enabled")

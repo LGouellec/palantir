@@ -5,7 +5,6 @@ Loads and parses Kafka configuration from YAML file
 """
 
 import os
-import yaml
 from typing import Dict, Optional, Any
 from pathlib import Path
 
@@ -57,10 +56,9 @@ class KafkaConfig:
     def bootstrap_servers(self) -> str:
         """Get bootstrap servers"""
         # Environment variable overrides config file
-        return os.getenv('KAFKA_BOOTSTRAP_SERVERS') or \
-               self._config.get('bootstrap.servers','localhost:9092')
+        return self._config.get('bootstrap.servers', os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092'))
 
-    def get_producer_config(self) -> Dict[str, Any]:
+    def get_kafka_config(self) -> Dict[str, Any]:
         return self._config
 
 

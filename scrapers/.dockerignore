@@ -1,0 +1,48 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Data directories (don't include in image)
+data/
+articles/
+*.json
+*.csv
+*.mitm
+*.har
+
+# Logs
+*.log
+logs/
+
+# Documentation
+*.md
+!README.md
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore

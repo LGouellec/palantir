@@ -29,9 +29,19 @@ RUN pip install --no-cache-dir confluent-kafka # For Kafka integration
 COPY wsj_scraper.py .
 COPY wsj_scraper_distributed.py .
 COPY kafka_config.py .
+COPY stt/audio_transcriber.py stt/audio_transcriber.py
+COPY mouvement/human.py mouvement/human.py
 
 # Create output directory
-RUN mkdir -p /data/articles /app/history
+RUN mkdir -p /data/articles /app/history /app/data/images
+
+# Copy CA installation script for mitmproxy
+COPY install_ca_in_container.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/install_ca_in_container.sh
+
+# Copy entrypoint script
+COPY entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Environment variables with defaults
 ENV POD_INDEX=0
@@ -42,8 +52,7 @@ ENV LIMIT=20
 ENV DELAY=2.0
 ENV HEADLESS=true
 
-
-ENTRYPOINT ["python"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # Default command (can be overridden)
 CMD ["wsj_scraper_distributed.py"]

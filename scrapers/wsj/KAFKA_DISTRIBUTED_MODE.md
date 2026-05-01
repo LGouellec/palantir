@@ -2,8 +2,6 @@
 
 ## Vue d'ensemble
 
-Le mode Kafka remplace l'ancienne implémentation Redis pour la distribution des URLs entre les pods workers. 
-
 ### Architecture
 
 ```
