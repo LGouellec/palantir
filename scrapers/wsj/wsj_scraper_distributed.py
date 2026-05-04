@@ -385,9 +385,10 @@ class DistributedWSJScraper(WSJScraper):
             scraped_count = 0
 
             while True:
-                url, message = self._get_url_from_kafka(timeout=5.0)
+                result = self._get_url_from_kafka(timeout=5.0)
 
-                if url is None:
+
+                if result is None:
                     # No more URLs in topic
                     print(f"📭 No URLs available. Pod {self.pod_index} will sleep 30 seconds and retry.")
                     if self.kafka_enabled:
@@ -395,6 +396,8 @@ class DistributedWSJScraper(WSJScraper):
                     sleep(30)
                     continue
 
+                url, message = result
+                
                 # Check if already scraped
                 if not force and self._is_already_scraped(url):
                     print(f"⏭️  [{self.pod_index}] Already scraped: {url}")
