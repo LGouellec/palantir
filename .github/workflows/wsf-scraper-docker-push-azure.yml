@@ -9,7 +9,7 @@ on:
 env:
   ACR_NAME: palantiracr
   IMAGE_NAME: palantir/wsj-scraper
-  DOCKERFILE_PATH: ./Dockerfile
+  DOCKERFILE_PATH: ./scrapers/wsj/Dockerfile
 
 jobs:
   build-and-push-acr:
