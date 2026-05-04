@@ -19,8 +19,6 @@ services:
     volumes:
       - ./images/coordinator:/app/data/images
     depends_on:
-      proxy:
-        condition: service_started
       kafka:
         condition: service_started
     networks:
@@ -42,8 +40,6 @@ services:
       DELAY: 2.0
     command: wsj_scraper_distributed.py --verbose
     depends_on:
-      proxy:
-        condition: service_started
       kafka:
         condition: service_started
     networks:
@@ -65,8 +61,6 @@ services:
       DELAY: 2.0
     command: wsj_scraper_distributed.py --verbose
     depends_on:
-      proxy:
-        condition: service_started
       kafka:
         condition: service_started
     networks:
@@ -88,8 +82,6 @@ services:
       DELAY: 2.0
     command: wsj_scraper_distributed.py --verbose
     depends_on:
-      proxy:
-        condition: service_started
       kafka:
         condition: service_started
     networks:

@@ -117,10 +117,11 @@ class WSJScraper:
         """Check if URL has already been scraped"""
         return url in self.scraped_history
 
-    def _mark_as_scraped(self, url: str) -> None:
+    def _mark_as_scraped(self, url: str, persist:bool = True) -> None:
         """Mark URL as scraped in history"""
         self.scraped_history[url] = datetime.now().isoformat()
-        self._save_history()
+        if persist:
+            self._save_history()
 
     def _init_kafka(self) -> None:
         """Initialize Kafka producer"""
@@ -353,6 +354,12 @@ class WSJScraper:
                     parsed.fragment
                 ))
 
+                # Check if this page was already fetched
+                if self._is_already_scraped(page_url):
+                    self.logger.info(f"Page {current_page} already fetched, stopping pagination")
+                    print(f"📄 Page {current_page}: Already fetched, stopping pagination")
+                    break
+
                 self.logger.info(f"Fetching page {current_page}: {page_url}")
                 print(f"📄 Fetching page {current_page}...")
 
@@ -381,6 +388,9 @@ class WSJScraper:
 
                     self.logger.info(f"Page {current_page}: Found {new_count} new articles ({len(all_links)} total)")
                     print(f"📄 Page {current_page}: +{new_count} articles (total: {len(all_links)})")
+
+                    # Mark this page as scraped
+                    self._mark_as_scraped(page_url, False)
 
                     # Check if we've reached limit
                     if len(all_links) >= limit:

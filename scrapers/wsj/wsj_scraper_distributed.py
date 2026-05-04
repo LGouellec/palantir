@@ -8,8 +8,10 @@ import os
 from time import sleep
 import hashlib
 import json
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from pathlib import Path
+
+from confluent_kafka import Message
 
 from wsj_scraper import WSJScraper
 
@@ -86,7 +88,8 @@ class DistributedWSJScraper(WSJScraper):
                     'group.id': self.kafka_urls_consumer_group,
                     'auto.offset.reset': 'earliest',
                     'enable.auto.commit': True,
-                    'auto.commit.interval.ms': 5000,
+                    'auto.commit.interval.ms': 5000, 
+                    'enable.auto.offset.store': False, 
                 })
                 self.kafka_url_consumer = Consumer(consumer_config)
                 self.kafka_url_consumer.subscribe([self.kafka_urls_topic])
@@ -157,7 +160,7 @@ class DistributedWSJScraper(WSJScraper):
         self.logger.info(f"Pushed {len(urls)} URLs to Kafka topic: {self.kafka_urls_topic}")
         print(f"📤 Pushed {len(urls)} URLs to Kafka topic: {self.kafka_urls_topic}")
 
-    def _get_url_from_kafka(self, timeout: float = 5.0) -> Optional[str]:
+    def _get_url_from_kafka(self, timeout: float = 5.0) -> Optional[Tuple[str, Message]]:
         """Get next URL from Kafka topic (using consumer group protocol)"""
         if not self.kafka_url_consumer:
             raise RuntimeError("Kafka URL consumer not initialized")
@@ -184,7 +187,7 @@ class DistributedWSJScraper(WSJScraper):
             self.logger.debug(
                 f"Consumed URL from partition {msg.partition()}, offset {msg.offset()}"
             )
-            return url
+            return (url, msg)
 
         except Exception as e:
             self.logger.error(f"Error consuming URL from Kafka: {e}")
@@ -269,7 +272,11 @@ class DistributedWSJScraper(WSJScraper):
         print(f"✅ Coordinator pod {self.pod_index}: URLs pushed.")
 
         for url in all_urls:
-            self._mark_as_scraped(url)
+            self._mark_as_scraped(url, False)
+
+        # persist the file just once
+        if all_urls:
+            self._mark_as_scraped(all_urls[-1])
         
     def scrape_and_save_distributed(
         self,
@@ -378,7 +385,7 @@ class DistributedWSJScraper(WSJScraper):
             scraped_count = 0
 
             while True:
-                url = self._get_url_from_kafka(timeout=5.0)
+                url, message = self._get_url_from_kafka(timeout=5.0)
 
                 if url is None:
                     # No more URLs in topic
@@ -414,7 +421,7 @@ class DistributedWSJScraper(WSJScraper):
                             print(f"  ⚠️  Only {word_count} words (likely paywalled)")
                     else:
                         print(f"  ⚠️  No content found")
-
+                    self.kafka_url_consumer.store_offsets(message)
                 except Exception as e:
                     print(f"  ❌ Error: {e}")
                     self.logger.error(f"Error scraping {url}: {e}")
