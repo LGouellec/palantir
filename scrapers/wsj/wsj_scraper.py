@@ -14,9 +14,12 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
+
+import requests
 from stt.audio_transcriber import AudioTranscriber
 from mouvement.human import HumanMouseSimulator
 from playwright.sync_api import Page
+from scrapling.core._types import SetCookieParam
 from scrapling.fetchers import StealthyFetcher
 from kafka_config import load_kafka_config, KafkaConfig
 from scrapling.engines.toolbelt.custom import Response
@@ -43,7 +46,7 @@ class WSJScraper:
         self.headless = headless
         self.verbose = verbose
         self.history_file = Path(history_file)
-
+        self.lastFetch401=True
         # Load Kafka configuration from file
         self.kafka_config: Optional[KafkaConfig] = None
         if kafka_config_file or Path("kafka_config.properties").exists():
@@ -255,12 +258,24 @@ class WSJScraper:
     def load_tracking_mouse(self, page:Page):
         self.simulator = HumanMouseSimulator(page, self.logger)
         self.simulator.enable_mouse_tracking()
+        self.logger.info(f'Webdriver used : {page.evaluate("navigator.webdriver")}')
+        self.logger.info(f'User-Agent : {page.evaluate("navigator.userAgent")}')
+        self.logger.info(f'Plugins length : {page.evaluate("navigator.plugins.length")}')
+        self.logger.info(f'Navigator Languages : {page.evaluate("navigator.languages")}')
+        self.logger.info(page.evaluate("""
+            (() => {
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (!gl) return "NO_WEBGL";
+                return {
+                    vendor: gl.getParameter(gl.VENDOR),
+                    renderer: gl.getParameter(gl.RENDERER)
+                };
+            })()
+            """))
 
     def by_pass_captcha(self, page:Page):
-
-        status = page.evaluate("() => navigator.webdriver");
-        self.logger.info(f"Webdriver used : {status}")
-
+        
         page.wait_for_load_state("domcontentloaded")
 
         if page.locator('div.css-jzm21u-MastHeadContainer.e1mkna771').count() > 0:
@@ -275,8 +290,8 @@ class WSJScraper:
         if HumanMouseSimulator.wait_for_frame_selector(framelocator, '#ddv1-captcha-container'):
             page.screenshot(path=f'./data/images/screenshot-iframe.png', full_page=True)
             n = random.random()
-            # 80% audio, 20% slider resolver
-            if n < 0.80: # Try resolving audio captcha
+            # 50% audio, 50% slider resolver
+            if n < 0.50: # Try resolving audio captcha
                 self.logger.info(f'Trying resolving audio captcha')
 
                 def fill_func(index:int, value:int, typing_speed:float):
@@ -308,6 +323,10 @@ class WSJScraper:
         page.screenshot(path=f'./data/images/screenshot-iframe-after.png', full_page=True)
         sleep(2)    
         page.screenshot(path=f'./data/images/screenshot-iframe-after2.png', full_page=True)
+
+        # Force to reload
+        # page.reload()
+        # page.screenshot(path=f'./data/images/screenshot-after-reload.png', full_page=True)
 
         page.wait_for_selector('div.css-jzm21u-MastHeadContainer.e1mkna771')
         page.screenshot(path=f'./data/images/screenshot-final.png', full_page=True)        
@@ -504,7 +523,7 @@ class WSJScraper:
 
             # Extract article content
             paragraphs = self._extract_content(page)
-            article_data['content'] = '\n\n'.join(paragraphs)
+            article_data['content'] = self.remove_copyright('\n\n'.join(paragraphs))
             article_data['word_count'] = len(' '.join(paragraphs).split())
             self.logger.info(f"Extracted {len(paragraphs)} paragraphs, {article_data['word_count']} words")
 
@@ -514,6 +533,10 @@ class WSJScraper:
             self.logger.error(f"Error scraping article {url}: {e}", exc_info=self.verbose)
             print(f"  ❌ Error: {e}")
             return None
+
+    def remove_copyright(self, text: str):
+        pattern = r"Copyright ©\d{4} Dow Jones & Company, Inc\..*"
+        return re.sub(pattern, "", text, flags=re.DOTALL)
 
     def _extract_title(self, page) -> Optional[str]:
         """Extract article title using multiple selectors"""
@@ -859,29 +882,85 @@ class WSJScraper:
         proxy = os.getenv('HTTP_PROXY', None)
         self.logger.info(f"Using HTTP Proxy {proxy}")
         while retry == True:
+            cookies = []
+            if self.lastFetch401:
+                self.logger.info(f'Trying to inject a fetched cookie : ')
+                c = self.fetch_cookie()
+                if c is not None:
+                    cookies.append(c)
             response = StealthyFetcher.fetch(
                         url,
-                        retries=10,
+                        retries=3,
                         timeout=60000,
                         proxy=proxy,
                         user_data_dir="./chrome",
                         headless=self.headless,
                         network_idle=True,
-                        google_search=False,
+                        google_search=True,
                         load_dom=True,
+                        cookies=cookies,
                         allow_webgl=True,
-                        hide_canvas=True,
+                        hide_canvas=False,
                         disable_resources=False,
                         page_action=self.by_pass_captcha,
                         page_setup=self.load_tracking_mouse)
+        
             if response.status == 401:
                 # captcha enabled, need to retry
                 print(f"Retry fetching {url} due captcha enabled")
+                self.lastFetch401 = True
             elif response.status == 200 or response.status == 404:
+                self.lastFetch401 = False
                 return response
             else:
                 print(f"Retry fetching {url} due to a bad status code (HTTP:{response.status})")
         
+    def fetch_cookie(self) -> Optional[SetCookieParam]:
+        url = "https://api-js.datadome.co/js/"
+
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
+            "content-type": "application/x-www-form-urlencoded",
+            "origin": "https://www.wsj.com",
+            "referer": "https://www.wsj.com/",
+            "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+        }
+        data = "eventCounters=%7B%22mousemove%22%3A1%2C%22click%22%3A0%2C%22scroll%22%3A0%2C%22touchstart%22%3A0%2C%22touchend%22%3A0%2C%22touchmove%22%3A0%2C%22keydown%22%3A0%2C%22keyup%22%3A0%7D&jsType=le&cid=A8xSIwt9fbtNh9MDs0WolkHfOamr~89E72XwyKKnNLEy8MFXGADxoI1Q2SKnXOu~oY5b8eKZhm~NnjBf7UjjBow5ELmmk9OfvmIWQtWIjxibP6rlWAwyxfDAh8RWdoZ~&ddk=F45F521D9622089B5E33C18031FB8E&Referer=https%253A%252F%252Fwww.wsj.com&request=%252F&responsePage=origin&ddv=5.6.1"
+        response = requests.post(url, headers=headers, data=data)
+        json_data = response.json()
+        if json_data["cookie"]:
+            cookie_str = json_data["cookie"]
+            parts = [p.strip() for p in cookie_str.split(";")]
+            name, value = parts[0].split("=", 1)
+            cookie_dict = {
+                "name": name,
+                "value": value,
+                "domain": None,
+                "path": "/",
+                "secure": False,
+                "expires": None,
+                "sameSite": None,
+            }
+
+            for part in parts[1:]:
+                if part.lower().startswith("domain="):
+                    cookie_dict["domain"] = part.split("=", 1)[1]
+                elif part.lower().startswith("path="):
+                    cookie_dict["path"] = part.split("=", 1)[1]
+                elif part.lower().startswith("max-age="):
+                    max_age = int(part.split("=", 1)[1])
+                    cookie_dict["expires"] = time.time() + max_age
+                elif part.lower().startswith("samesite="):
+                    cookie_dict["sameSite"] = part.split("=", 1)[1]
+                elif part.lower() == "secure":
+                    cookie_dict["secure"] = True
+            
+            self.logger.debug(f'Fetched cookie : {cookie_dict}')
+            return cookie_dict
+        else:
+            return None
+
 
 def main():
     import argparse

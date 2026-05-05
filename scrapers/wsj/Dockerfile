@@ -33,7 +33,7 @@ COPY stt/audio_transcriber.py stt/audio_transcriber.py
 COPY mouvement/human.py mouvement/human.py
 
 # Create output directory
-RUN mkdir -p /data/articles /app/history /app/data/images
+RUN mkdir -p /data/articles /app/history /app/data/images /app/chrome
 
 # Copy CA installation script for mitmproxy
 COPY install_ca_in_container.sh /usr/local/bin/

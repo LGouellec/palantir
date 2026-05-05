@@ -163,6 +163,89 @@ class HumanMouseSimulator:
         self.logger.debug(f"Mouse position unavailable, using last known position: {self.last_position}")
         return self.last_position
 
+    def mouse_move2(
+        self,
+        start_x: int,
+        start_y: int,
+        end_x: int,
+        end_y: int,
+        steps: int = 40,
+        shaky_hand: bool = True
+    ):
+        """
+        Human-like mouse movement with:
+        - segmented movement
+        - overshoot + correction
+        - acceleration/deceleration
+        - jitter + tremor
+        - micro-pauses
+        """
+
+        # -----------------------------
+        # 1. Randomized target inside element
+        # -----------------------------
+        end_x += random.uniform(-2, 2)
+        end_y += random.uniform(-2, 2)
+
+        # -----------------------------
+        # 2. Overshoot (humans rarely stop perfectly)
+        # -----------------------------
+        overshoot_x = end_x + random.uniform(-8, 8)
+        overshoot_y = end_y + random.uniform(-8, 8)
+
+        # Movement segments: rough → correction → fine adjust
+        segments = [
+            (start_x, start_y, overshoot_x, overshoot_y, int(steps * 0.6)),
+            (overshoot_x, overshoot_y, end_x, end_y, int(steps * 0.4)),
+        ]
+
+        for (sx, sy, ex, ey, seg_steps) in segments:
+
+            # Random control point for curvature
+            cx = (sx + ex) / 2 + random.randint(-90, 90)
+            cy = (sy + ey) / 2 + random.randint(-90, 90)
+
+            for i in range(seg_steps + 1):
+                t = i / seg_steps
+
+                # Smooth acceleration/deceleration
+                t = t * t * (3 - 2 * t)
+
+                # Quadratic Bézier curve
+                x = (1 - t)**2 * sx + 2 * (1 - t) * t * cx + t**2 * ex
+                y = (1 - t)**2 * sy + 2 * (1 - t) * t * cy + t**2 * ey
+
+                # Natural jitter
+                x += random.uniform(-0.8, 0.8)
+                y += random.uniform(-0.8, 0.8)
+
+                # Shaky hand micro-oscillation
+                if shaky_hand:
+                    x += math.sin(t * math.pi * random.randint(2, 4)) * random.uniform(0.3, 1.0)
+                    y += math.cos(t * math.pi * random.randint(2, 4)) * random.uniform(0.3, 1.0)
+
+                # Move mouse
+                self.page.mouse.move(x, y)
+
+                # Variable delay (more natural)
+                base_delay = 0.003 + (1 - abs(0.5 - t)) * 0.012
+                time.sleep(base_delay + random.uniform(0.001, 0.004))
+
+            # Micro pause between segments
+            time.sleep(random.uniform(0.015, 0.045))
+
+        # -----------------------------
+        # 3. Final tremor (tiny human correction)
+        # -----------------------------
+        for _ in range(random.randint(1, 3)):
+            tremor_x = end_x + random.uniform(-1.2, 1.2)
+            tremor_y = end_y + random.uniform(-1.2, 1.2)
+            self.page.mouse.move(tremor_x, tremor_y)
+            time.sleep(random.uniform(0.01, 0.025))
+
+        # Update last known position
+        self.last_position = {"x": end_x, "y": end_y}
+
     def mouse_move(
         self,
         start_x: int,
@@ -230,8 +313,10 @@ class HumanMouseSimulator:
         locator.wait_for(state="visible")
         box = self.safe_bounding_box(locator)
 
-        target_x = box["x"] + box["width"] / 2
-        target_y = box["y"] + box["height"] / 2
+        # target_x = box["x"] + box["width"] / 2
+        # target_y = box["y"] + box["height"] / 2
+        target_x = box["x"] + random.uniform(0.3, 0.7) * box["width"]
+        target_y = box["y"] + random.uniform(0.3, 0.7) * box["height"]
 
         # Current mouse position
         pos = self.get_real_mouse_position()
@@ -245,6 +330,7 @@ class HumanMouseSimulator:
 
         # Type
         # locator.fill(text)
+        self.logger.debug(f'Fill text {text}')
         locator.press_sequentially(text, delay=delay)
 
     def drag_slider(self, start_locator: Locator, end_locator: Locator):
