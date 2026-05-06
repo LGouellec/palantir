@@ -540,7 +540,7 @@ Examples:
 
     # Kafka options
     parser.add_argument('--kafka', '--enable-kafka', action='store_true',
-                        default=os.getenv('KAFKA_ENABLED', False),
+                        default=str(os.getenv('KAFKA_ENABLED', False)).lower() in ("1", "true", "yes", "on"),
                         dest='kafka_enabled',
                        help='Enable Kafka publishing (requires confluent-kafka)')
     parser.add_argument('--kafka-config',

@@ -11,6 +11,7 @@ import logging
 import random
 from time import sleep
 import os
+import base64
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -23,7 +24,8 @@ from scrapling.core._types import SetCookieParam
 from scrapling.fetchers import StealthyFetcher
 from kafka_config import load_kafka_config, KafkaConfig
 from scrapling.engines.toolbelt.custom import Response
-
+from browserforge.fingerprints import FingerprintGenerator
+from browserforge.injectors.utils import InjectFunction, only_injectable_headers
 
 class WSJScraper:
     """WSJ Article Scraper using Scrapling's StealthyFetcher for anti-bot avoidance"""
@@ -41,6 +43,16 @@ class WSJScraper:
         kafka_config_file: Optional[str] = None
     ):
         self.base_url = base_url
+        
+        self.fingerprints = FingerprintGenerator()
+        self.fingerprint = self.fingerprints.generate()
+        injectFingerPrintStr = InjectFunction(self.fingerprint)
+        # Disable for now
+        # self.tempFingerPrint = tempfile.NamedTemporaryFile(mode='w+t', delete=False)
+        # self.tempFingerPrint.write(injectFingerPrintStr)
+        # self.tempFingerPrint.flush()
+        
+        self.session_cookies = []
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.headless = headless
@@ -257,11 +269,13 @@ class WSJScraper:
 
     def load_tracking_mouse(self, page:Page):
         self.simulator = HumanMouseSimulator(page, self.logger)
+        
         self.simulator.enable_mouse_tracking()
         self.logger.info(f'Webdriver used : {page.evaluate("navigator.webdriver")}')
         self.logger.info(f'User-Agent : {page.evaluate("navigator.userAgent")}')
         self.logger.info(f'Plugins length : {page.evaluate("navigator.plugins.length")}')
         self.logger.info(f'Navigator Languages : {page.evaluate("navigator.languages")}')
+        self.logger.info(f'Battery : {page.evaluate("navigator.getBattery")}')
         self.logger.info(page.evaluate("""
             (() => {
                 const canvas = document.createElement('canvas');
@@ -280,12 +294,24 @@ class WSJScraper:
 
         if page.locator('div.css-jzm21u-MastHeadContainer.e1mkna771').count() > 0:
             self.logger.info("Skip captcha bypass ...")
+            # 25% random movement in the page to simulate real human read
+            if random.random() < 0.25:
+                self.simulator.random_mouse_movements(10)
+                page.wait_for_timeout(random.randint(500, 2000))
+                page.mouse.wheel(0, random.randint(200, 800))
             return
 
         self.logger.info("Captcha is triggered. Try to disable it automatically ...")
         page.screenshot(path=f'./data/images/screenshot-init.png', full_page=True)
 
         framelocator = page.locator('iframe').content_frame
+                
+        # Check if web page is blocked
+        if framelocator.get_by_text('Access is temporarily restricted', exact=True).count() > 0:
+            self.logger.warning('Web page is blocked. Clear cookies and reload.')
+            page.context.clear_cookies()
+            time.sleep(random.uniform(1, 3))
+            page.reload()
 
         if HumanMouseSimulator.wait_for_frame_selector(framelocator, '#ddv1-captcha-container'):
             page.screenshot(path=f'./data/images/screenshot-iframe.png', full_page=True)
@@ -324,11 +350,12 @@ class WSJScraper:
         sleep(2)    
         page.screenshot(path=f'./data/images/screenshot-iframe-after2.png', full_page=True)
 
-        # Force to reload
-        # page.reload()
-        # page.screenshot(path=f'./data/images/screenshot-after-reload.png', full_page=True)
-
         page.wait_for_selector('div.css-jzm21u-MastHeadContainer.e1mkna771')
+         # 25% random movement in the page to simulate real human read
+        if random.random() < 0.25:
+            self.simulator.random_mouse_movements(10)
+            page.wait_for_timeout(random.randint(500, 2000))
+            page.mouse.wheel(0, random.randint(200, 800))
         page.screenshot(path=f'./data/images/screenshot-final.png', full_page=True)        
         self.simulator.reset_position()
 
@@ -877,39 +904,46 @@ class WSJScraper:
         print(f"   Total in history: {len(self.scraped_history)}")
         print(f"   History file: {self.history_file.absolute()}")
 
-    def fetch(self, url: str = None) -> Response:
+    def fetch(self, url: str = None) -> Response:     
         retry = True
         proxy = os.getenv('HTTP_PROXY', None)
         self.logger.info(f"Using HTTP Proxy {proxy}")
+    
         while retry == True:
-            cookies = []
-            if self.lastFetch401:
-                self.logger.info(f'Trying to inject a fetched cookie : ')
-                c = self.fetch_cookie()
-                if c is not None:
-                    cookies.append(c)
+
+            # if self.lastFetch401:
+            #     self.logger.info(f'Trying to inject a fake fetched cookie : ')
+            #     c = self.fetch_cookie()
+            #     if c is not None:
+            #         self.session_cookies = []
+            #         self.session_cookies.append(c)
+                
             response = StealthyFetcher.fetch(
                         url,
                         retries=3,
                         timeout=60000,
                         proxy=proxy,
-                        user_data_dir="./chrome",
                         headless=self.headless,
                         network_idle=True,
                         google_search=True,
                         load_dom=True,
-                        cookies=cookies,
+                        cookies=self.session_cookies,
+                        user_data_dir="./chrome",
                         allow_webgl=True,
                         hide_canvas=False,
                         disable_resources=False,
                         page_action=self.by_pass_captcha,
                         page_setup=self.load_tracking_mouse)
-        
+            
+            if response.cookies:
+                self.session_cookies = response.cookies
+
             if response.status == 401:
                 # captcha enabled, need to retry
                 print(f"Retry fetching {url} due captcha enabled")
+                time.sleep(random.uniform(2, 5))
                 self.lastFetch401 = True
-            elif response.status == 200 or response.status == 404:
+            elif response.status == 200 or response.status == 404:                
                 self.lastFetch401 = False
                 return response
             else:
@@ -926,7 +960,8 @@ class WSJScraper:
             "referer": "https://www.wsj.com/",
             "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
         }
-        data = "eventCounters=%7B%22mousemove%22%3A1%2C%22click%22%3A0%2C%22scroll%22%3A0%2C%22touchstart%22%3A0%2C%22touchend%22%3A0%2C%22touchmove%22%3A0%2C%22keydown%22%3A0%2C%22keyup%22%3A0%7D&jsType=le&cid=A8xSIwt9fbtNh9MDs0WolkHfOamr~89E72XwyKKnNLEy8MFXGADxoI1Q2SKnXOu~oY5b8eKZhm~NnjBf7UjjBow5ELmmk9OfvmIWQtWIjxibP6rlWAwyxfDAh8RWdoZ~&ddk=F45F521D9622089B5E33C18031FB8E&Referer=https%253A%252F%252Fwww.wsj.com&request=%252F&responsePage=origin&ddv=5.6.1"
+
+        data = f"jspl={base64.b64encode(os.urandom(32)).decode('utf-8')}&eventCounters=%5B%5D&jsType=ch&cid=HTQKryvAhPU0LA9N5ithwpCkGKuxy0s2TewyY~Bzb8p9iU1DcZUy9KTyFkt5COiZGVr_MevrZwbty9Cd2yLOGRn03O0fOjUQYG3XAuuqEaDW7eeN_563FrDMek9vyovL&ddk=D428D51E28968797BC27FB9153435D&Referer=https%253A%252F%252Fwww.wsj.com%252Feconomy%252Fcentral-banking&request=%252Feconomy%252Fcentral-banking&responsePage=origin&ddv=5.6.2"
         response = requests.post(url, headers=headers, data=data)
         json_data = response.json()
         if json_data["cookie"]:
@@ -1007,7 +1042,7 @@ Examples:
 
     # Kafka options
     parser.add_argument('--kafka', '--enable-kafka', action='store_true', dest='kafka_enabled',
-                        default=os.getenv('KAFKA_ENABLED', False),
+                        default=str(os.getenv('KAFKA_ENABLED', False)).lower() in ("1", "true", "yes", "on"),
                        help='Enable Kafka publishing (requires confluent-kafka)')
     parser.add_argument('--kafka-config',
                        default=os.getenv('KAFKA_CONFIG_FILE', 'kafka_config.properties'),

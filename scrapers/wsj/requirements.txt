@@ -3,3 +3,4 @@ scrapling[fetchers]>=0.4.7
 confluent-kafka>=2.3.0
 faster-whisper>=1.0.0
 requests
+browserforge[all]

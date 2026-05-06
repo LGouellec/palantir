@@ -17,12 +17,9 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-
 # Install Scrapling browser components
 RUN scrapling install
-
 # Install optional dependencies
-RUN pip install --no-cache-dir redis           # For distributed mode
 RUN pip install --no-cache-dir confluent-kafka # For Kafka integration
 
 # Copy scraper files
@@ -34,10 +31,6 @@ COPY mouvement/human.py mouvement/human.py
 
 # Create output directory
 RUN mkdir -p /data/articles /app/history /app/data/images /app/chrome
-
-# Copy CA installation script for mitmproxy
-COPY install_ca_in_container.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/install_ca_in_container.sh
 
 # Copy entrypoint script
 COPY entrypoint.sh /usr/local/bin/

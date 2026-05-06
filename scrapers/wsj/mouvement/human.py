@@ -46,7 +46,7 @@ class HumanMouseSimulator:
             window.addEventListener('mousemove', e => {
                 window._mouseX = e.clientX;
                 window._mouseY = e.clientY;
-                console.log(window._mouseX + "," + window._mouseY)
+                //console.log(window._mouseX + "," + window._mouseY)
             }, true);
         """
 
@@ -302,6 +302,60 @@ class HumanMouseSimulator:
         # Update last known position to final destination
         self.last_position = {"x": end_x, "y": end_y}
 
+    def mouse_move_fast(
+        self,
+        start_x: int,
+        start_y: int,
+        end_x: int,
+        end_y: int,
+        steps: int = 28,          # fewer steps = faster movement
+        shaky_hand: bool = True
+    ):
+        """
+        Faster human-like mouse movement using:
+        - Quadratic Bézier curve
+        - Smoothstep easing
+        - Lightweight jitter
+        - Optional micro-oscillation
+        """
+
+        # Precompute random control point
+        cx = (start_x + end_x) * 0.5 + random.uniform(-60, 60)
+        cy = (start_y + end_y) * 0.5 + random.uniform(-60, 60)
+
+        # Pre-generate oscillation frequencies (avoids randint inside loop)
+        osc_x = random.randint(2, 5)
+        osc_y = random.randint(2, 5)
+
+        for i in range(steps + 1):
+            t = i / steps
+            t = t * t * (3 - 2 * t)  # smoothstep easing
+
+            # Bézier curve
+            mt = 1 - t
+            x = mt * mt * start_x + 2 * mt * t * cx + t * t * end_x
+            y = mt * mt * start_y + 2 * mt * t * cy + t * t * end_y
+
+            # Small jitter
+            x += random.uniform(-0.8, 0.8)
+            y += random.uniform(-0.8, 0.8)
+
+            # Shaky-hand micro oscillations
+            if shaky_hand:
+                x += math.sin(t * math.pi * osc_x) * random.uniform(0.3, 1.0)
+                y += math.cos(t * math.pi * osc_y) * random.uniform(0.3, 1.0)
+
+            self.logger.debug(f"Mouse move {x},{y}")
+            self.page.mouse.move(x, y)
+
+            # Much faster delay
+            #delay = 0.0015 + (1 - abs(0.5 - t)) * 0.003 / 3
+            #delay += random.uniform(0.0003, 0.0012)
+            #delay = random.uniform(0.000001, 0.00003)
+            #time.sleep(delay)
+
+        self.last_position = {"x": end_x, "y": end_y}
+
     def move_and_type(self, locator: Locator, text: str, delay: float = None):
         """
         Move mouse to element, click it, and fill with text.
@@ -359,7 +413,13 @@ class HumanMouseSimulator:
 
         # Move mouse to start (human-like)
         pos = self.get_real_mouse_position()
-        self.mouse_move(pos["x"], pos["y"], start_x, start_y)
+        rd = random.randint(0,100)
+        if rd < 50:
+            self.mouse_move(pos["x"], pos["y"], start_x, start_y, 28)
+        elif rd >= 50 and rd < 75:
+            self.mouse_move2(pos["x"], pos["y"], start_x, start_y)
+        else:
+            self.mouse_move_fast(pos["x"], pos["y"], start_x, start_y)
 
         # Real mouse down
         self.page.mouse.down()
@@ -467,3 +527,70 @@ class HumanMouseSimulator:
             time.sleep(0.5)
             if datetime.now() > (old_date + timeout):
                 return False
+
+    def random_mouse_movements(self, count: int = 10, allow_scroll: bool = True):
+        """
+        Simulate random human-like mouse movements across the viewport.
+
+        Args:
+            count: number of movements
+            allow_scroll: randomly perform scroll actions
+        """
+
+        viewport = self.page.viewport_size
+        if not viewport:
+            self.logger.debug("Viewport unavailable, skipping random_mouse_movements")
+            return
+
+        width = viewport["width"]
+        height = viewport["height"]
+
+        self.logger.debug(f"Starting random_mouse_movements with {count} moves")
+
+        for i in range(count):
+            # Get current position (real if possible)
+            pos = self.get_real_mouse_position()
+            start_x, start_y = pos["x"], pos["y"]
+
+            # Random target (avoid edges)
+            margin = 50
+            target_x = random.randint(margin, max(margin + 1, width - margin))
+            target_y = random.randint(margin, max(margin + 1, height - margin))
+
+            self.logger.debug(f"[Move {i+1}] {start_x},{start_y} → {target_x},{target_y}")
+
+            # Use your BEST movement (mouse_move2 = ultra réaliste)
+            self.mouse_move2(
+                start_x,
+                start_y,
+                target_x,
+                target_y,
+                steps=random.randint(25, 60),
+                shaky_hand=True
+            )
+
+            # Micro pause (humain)
+            pause = random.uniform(0.2, 1.2)
+            self.logger.debug(f"Pause after move: {pause:.2f}s")
+            time.sleep(pause)
+
+            # Scroll occasionnel (très important pour Datadome)
+            if allow_scroll and random.random() < 0.35:
+                scroll_amount = random.randint(100, 800) * random.choice([-1, 1])
+                self.logger.debug(f"Scrolling: {scroll_amount}")
+
+                self.page.mouse.wheel(0, scroll_amount)
+
+                # Pause après scroll
+                time.sleep(random.uniform(0.3, 1.0))
+
+            # Micro "hover hesitation"
+            if random.random() < 0.2:
+                jitter_x = target_x + random.uniform(-5, 5)
+                jitter_y = target_y + random.uniform(-5, 5)
+
+                self.logger.debug(f"Micro hover jitter: {jitter_x},{jitter_y}")
+                self.page.mouse.move(jitter_x, jitter_y)
+                time.sleep(random.uniform(0.05, 0.2))
+
+        self.logger.debug("Finished random_mouse_movements")
