@@ -6,6 +6,7 @@ chrome/
 # Output directories
 articles/
 output/
+.nasdaq_cache
 scraped_articles/
 wsj_articles/
 scraped_history.json
