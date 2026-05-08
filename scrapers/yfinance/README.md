@@ -4,20 +4,47 @@ A high-performance async analytics fetcher for Yahoo Finance stock data, designe
 
 ## Features
 
+### Core Fetching
 - **Concurrent fetching**: Fetch 100+ stocks in parallel using asyncio
 - **Rate limiting**: Built-in semaphore-based rate limiting (default: 20 concurrent requests)
 - **Automatic retry with exponential backoff**: Handles 429 errors, network issues, and transient failures
-- **Comprehensive data**: 
+- **Complete data capture**: Retains ALL yfinance data (100+ fields) including:
   - Real-time quotes (price, market cap, PE/PB ratios)
   - Fundamental data (financials, balance sheet, cash flow)
-  - Company news and analyst guidance
+  - Company news and press releases
+  - Analyst guidance and recommendations
   - Historical price data with analytics (CAGR, volatility, max drawdown)
   - Valuation metrics (F-Score components, historical PE/PB)
+  - Dividends history, splits, institutional holdings, insider transactions
+  - Quarterly statements, options data, and all raw info fields
 - **Graceful error handling**: Individual stock failures don't break batch operations
-- **Built-in scheduler**: Automatic data refresh at configurable intervals
-- **Callback system**: Real-time notifications when data updates
-- **Retry statistics**: Track and monitor rate limit issues
 - **NASDAQ ticker list**: Fetch official ticker lists from NASDAQ FTP server (3000+ stocks)
+
+### Real-Time Monitoring
+- **Built-in scheduler**: Automatic data refresh at configurable intervals
+- **Batch monitoring**: Monitor 1000+ stocks with weighted rotation
+- **Preferred tickers**: Priority fetching for your watchlist (3x weight)
+- **Callback system**: Real-time notifications when data updates
+- **Market hours awareness**: Respects market hours (7:30 AM - 6:00 PM ET, weekdays)
+
+### Proxy & Rate Limiting
+- **Proxy rotation**: Distribute requests across multiple SOCKS5 proxies
+- **SOCKS5 support**: Works with Yahoo Finance (HTTP proxies are blocked)
+- **Health checking**: Automatic failover to healthy proxies
+- **Per-proxy rate limiting**: Configurable limits per proxy
+- **Retry statistics**: Track and monitor rate limit issues
+
+### News & Sentiment
+- **News fetching**: Company news and press releases from Yahoo Finance
+- **Sentiment analysis**: Keyword-based or LLM-based sentiment analysis
+- **Impact scoring**: Categorize news by impact and confidence
+- **Key themes**: Extract themes, catalysts, and risks from news
+
+### Integration & CLI
+- **Kafka integration**: Publish stock updates to Kafka topics (optional)
+- **Command-line runner**: Full-featured CLI with configurable parameters
+- **WebSocket testing**: Test real-time streaming with yfinance WebSocket API
+- **Docker support**: Production-ready Docker images and compose files
 
 ## Architecture
 
@@ -25,24 +52,29 @@ A high-performance async analytics fetcher for Yahoo Finance stock data, designe
 
 ```
 scrapers/yfinance/
-├── analytics_engine.py          # Main async orchestrator
-├── nasdaq_tickers.py            # NASDAQ ticker list fetcher
-├── kafka_callback.py            # Kafka integration for real-time publishing
-├── example_usage.py             # Basic usage examples
-├── example_kafka.py             # Kafka integration examples
-├── example_nasdaq_monitoring.py # NASDAQ monitoring examples
+├── runner.py                     # CLI entry point with argparse
+├── analytics_engine.py           # Main async orchestrator
+├── models.py                     # Data models (StockAnalytics, StockQuote, etc.)
+├── proxy_rotator.py              # SOCKS5 proxy rotation with health checking
+├── nasdaq_tickers.py             # NASDAQ ticker list fetcher
+├── kafka_callback.py             # Kafka integration for real-time publishing
+├── test_websocket.py             # WebSocket real-time streaming test
 ├── data/fetcher/
-│   ├── base.py                  # Sync base classes
-│   ├── yfinance.py              # Sync YFinance implementation
-│   ├── async_base.py            # Async base classes
-│   └── async_yfinance.py        # Async YFinance wrapper
-└── news/
-    ├── base.py                  # News data models
-    └── fetcher/
-        ├── base.py              # Sync news fetcher base
-        ├── yfinance.py          # Sync news fetcher
-        ├── async_base.py        # Async news fetcher base
-        └── async_yfinance.py    # Async news wrapper
+│   ├── base.py                   # Sync base classes
+│   ├── yfinance.py               # Sync YFinance implementation (SOCKS5 proxy support)
+│   ├── async_base.py             # Async base classes
+│   └── async_yfinance.py         # Async YFinance wrapper
+├── news/
+│   ├── base.py                   # News data models
+│   ├── fetcher/
+│   │   ├── base.py               # Sync news fetcher base
+│   │   ├── yfinance.py           # Sync news fetcher (news + press releases)
+│   │   ├── async_base.py         # Async news fetcher base
+│   │   └── async_yfinance.py     # Async news wrapper
+│   └── analyzer/
+│       ├── base.py               # Sentiment analyzer base
+│       ├── keyword.py            # Keyword-based sentiment
+│       └── llm.py                # LLM-based sentiment (OpenAI)
 ```
 
 ### Design Decisions
@@ -72,35 +104,26 @@ pip install -r requirements.txt
 
 **Requirements:**
 - Python 3.9+ (for `asyncio.to_thread()`)
-- yfinance >= 0.2.40
+- yfinance >= 1.3.0 (for WebSocket support)
 - pandas >= 2.0.0
+- curl-cffi >= 0.6.0 (for SOCKS5 proxy support)
+- certifi >= 2023.0.0 (for SSL certificates)
+- confluent-kafka >= 2.0.0 (optional, for Kafka integration)
+- openai >= 1.0.0 (optional, for LLM-based sentiment analysis)
 
 ### Docker Installation (Recommended)
 
 **Quick Start:**
 ```bash
-# Interactive setup
-./docker-quickstart.sh
-
-# Or use Makefile
 make build
 make run
 make logs
-
-# Or use docker-compose
-docker-compose up -d
-docker-compose logs -f
 ```
 
 **With Kafka:**
 ```bash
-# Full stack (Scraper + Kafka + Kafka UI)
-docker-compose -f docker-compose.with-kafka.yml up -d
 
-# Access Kafka UI at http://localhost:8080
-```
-
-For detailed Docker documentation, see **[DOCKER.md](DOCKER.md)**
+See documentation, see **[README.md](../README.md)**
 
 ## Logging
 
@@ -128,7 +151,66 @@ logging.getLogger('nasdaq_tickers').setLevel(logging.INFO)
 
 ## Usage
 
-### Single Stock Analytics
+### Quick Start: Command-Line Runner
+
+The easiest way to start monitoring stocks is with the command-line runner:
+
+```bash
+# Basic monitoring (50 stocks, 30-second refresh)
+python runner.py
+
+# Monitor with news and sentiment
+python runner.py --include-news --analyze-sentiment
+
+# Monitor with Kafka publishing
+python runner.py --kafka --batch-size 50 --interval-ms 30000
+
+# Full configuration
+python runner.py \
+  --batch-size 100 \
+  --interval-ms 60000 \
+  --include-news \
+  --news-days 7 \
+  --analyze-sentiment \
+  --sentiment-analyzer keyword \
+  --kafka
+```
+
+**Command-line options:**
+- `--batch-size N`: Number of stocks to fetch per iteration (default: 50)
+- `--interval-ms MS`: Refresh interval in milliseconds (default: 30000 = 30s)
+- `--include-news` / `--no-news`: Enable/disable news fetching (default: enabled)
+- `--news-days N`: Days of news to fetch (default: 20)
+- `--analyze-sentiment` / `--no-sentiment`: Enable/disable sentiment analysis (default: enabled)
+- `--sentiment-analyzer {keyword,llm}`: Sentiment analyzer type (default: keyword)
+- `--kafka`: Enable Kafka publishing (default: disabled)
+
+**What it does:**
+1. Loads prefered ticker list if `PREFERED_TICKERS_PATH` is set
+2. Fetches all NASDAQ-listed stocks
+3. Randomizes ticker order to avoid patterns
+4. Starts batch monitoring with preferred tickers (3x weight)
+5. Publishes updates to Kafka (if `--kafka` enabled)
+6. Respects market hours (7:30 AM - 6:00 PM ET, weekdays)
+
+**Custom ticker list:**
+
+Edit `top_stocks.txt` to customize your watchlist:
+```
+AAPL
+GOOGL
+MSFT
+NVDA
+...
+```
+
+Set the env variable `PREFERED_TICKERS_PATH`
+
+### Programmatic Usage
+
+For custom integrations, use the engine directly:
+
+#### Single Stock Analytics
 
 ```python
 import asyncio
@@ -373,8 +455,6 @@ asyncio.run(main())
 - `nasdaqlisted.txt` - NASDAQ-listed stocks
 - `otherlisted.txt` - NYSE, AMEX, and other exchanges
 
-See `example_nasdaq_monitoring.py` for more examples.
-
 ## Sentiment Analysis
 
 Analyze sentiment of news articles using keyword-based or LLM-based analyzers.
@@ -518,7 +598,6 @@ engine.start_monitoring(
 3. Monitor fewer stocks
 4. Use keyword analyzer for initial screening, LLM for deep dives
 
-See `example_sentiment.py` for complete examples.
 
 ## API Reference
 
@@ -973,6 +1052,54 @@ asyncio.run(monitor_with_stats())
 }
 ```
 
+### Complete Data Capture
+
+The engine retains **ALL** information from yfinance (100+ fields), not just the subset shown above. This includes:
+
+**Additional data in `additional_data` field:**
+- `dividends_history`: Historical dividend payments
+- `splits_history`: Stock split history  
+- `recommendations`: Analyst recommendations history
+- `quarterly_income_stmt`: Quarterly income statements (raw)
+- `quarterly_balance_sheet`: Quarterly balance sheets (raw)
+- `quarterly_cashflow`: Quarterly cash flow statements (raw)
+- `institutional_holders`: Top institutional shareholders
+- `insider_transactions`: Recent insider trading activity
+- `insider_purchases`: Insider purchase history
+- `insider_roster_holders`: Current insider holdings
+- `options`: Available option expiration dates
+- `info_raw`: All raw fields from yfinance `info` property
+
+**Example: Accessing additional data**
+
+```python
+result = await engine.fetch_stock_analytics("AAPL", include_news=True)
+
+# Access standard fields
+print(f"Price: ${result['data']['current_price']:.2f}")
+print(f"PE Ratio: {result['data']['pe_ratio']:.2f}")
+
+# Access additional data
+if 'additional_data' in result:
+    additional = result['additional_data']
+    
+    # Dividend history
+    if 'dividends_history' in additional:
+        print(f"Latest dividend: {additional['dividends_history']}")
+    
+    # Institutional holders
+    if 'institutional_holders' in additional:
+        print(f"Top holders: {additional['institutional_holders']}")
+    
+    # Insider transactions
+    if 'insider_transactions' in additional:
+        print(f"Recent insider activity: {additional['insider_transactions']}")
+```
+
+**Kafka message includes all data:**
+
+When publishing to Kafka, the `additional_data` field is serialized and included in the message, giving you access to the complete dataset downstream.
+
 ## Performance
 
 **Benchmark: 100 stocks**
@@ -1182,80 +1309,134 @@ cp kafka.properties.example kafka.properties
 export KAFKA_CONFIG_PATH=$(pwd)/kafka.properties
 ```
 
-#### Example Scripts
+## Proxy Rotation
+
+Distribute requests across multiple SOCKS5 proxies to avoid rate limiting and IP blocking.
+
+### Why SOCKS5?
+
+**Important:** Yahoo Finance detects and blocks HTTP proxies. Use SOCKS5 proxies instead.
+
+See: [yfinance issue #2518](https://github.com/ranaroussi/yfinance/issues/2518)
+
+- ❌ **HTTP Proxies**: Detected and rejected by Yahoo Finance  
+- ✅ **SOCKS5 Proxies**: Works reliably with Yahoo Finance
+
+### Quick Setup
+
+**Method 1: Environment Variable**
 
 ```bash
-# Quick Kafka demo
-python3 quick_kafka.py
-
-# Comprehensive examples
-python3 example_kafka.py
+export PROXY_LIST="socks5://proxy1:1080,socks5://proxy2:1080,socks5://user:pass@proxy3:1080"
+export PROXY_MAX_RPM=60  # Max requests per minute per proxy
+python runner.py
 ```
 
-See `kafka_callback.py` and `example_kafka.py` for complete implementation details.
+**Method 2: Config File**
 
-## Examples
+Create `proxies.txt`:
+```
+socks5://proxy1.example.com:1080
+socks5://proxy2.example.com:1080
+socks5://user:pass@proxy3.example.com:1080
+```
 
-Run the example scripts to see all features in action:
-
-### Basic Usage
 ```bash
-python example_usage.py
+export PROXY_CONFIG_PATH=./proxies.txt
+python runner.py
 ```
 
-This will demonstrate:
-1. Single stock fetch with news and history
-2. Batch fetch (10 stocks)
-3. Batch summary (100+ stocks)
-4. Error handling with invalid tickers
+### How It Works
 
-### Preferred Tickers (Priority Fetching)
+1. **Round-Robin Rotation**: Distributes requests evenly across healthy proxies
+2. **Per-Proxy Rate Limiting**: Respects `max_requests_per_minute` per proxy
+3. **Health Checking**: Marks proxies unhealthy after consecutive failures
+4. **Auto-Failover**: Skips unhealthy or rate-limited proxies
+5. **Browser Impersonation**: Uses curl-cffi with Chrome impersonation to avoid detection
+
+### Recommended Proxy Providers
+
+**SOCKS5 proxy providers:**
+- [Bright Data](https://brightdata.com) - Enterprise residential SOCKS5
+- [Smartproxy](https://smartproxy.com) - Good balance of price/performance  
+- [Oxylabs](https://oxylabs.io) - High-quality residential/datacenter
+- [IPRoyal](https://iproyal.com) - Affordable residential SOCKS5
+
+### Testing Proxies
+
 ```bash
-python example_preferred_tickers.py
+# Test SOCKS5 connectivity
+curl --socks5 your-proxy:1080 https://finance.yahoo.com
+
+# Test proxy IP
+curl --socks5 your-proxy:1080 https://api.ipify.org
 ```
 
-This demonstrates:
-1. Batch fetch with preferred tickers fetched first
-2. Monitoring with preferred tickers prioritized
-3. Combining NASDAQ ticker list with your watchlist
+### Configuration
 
-When monitoring all NASDAQ stocks (~3000+), preferred tickers ensure your watchlist is fetched first before rate limiting throttles requests.
+```python
+from proxy_rotator import ProxyRotator
+from analytics_engine import AsyncAnalyticsEngine
 
-### Batch Monitoring (Weighted Rotation)
+# Initialize proxy rotator
+proxy_rotator = ProxyRotator(
+    proxies=[
+        "socks5://proxy1.example.com:1080",
+        "socks5://proxy2.example.com:1080",
+    ],
+    max_requests_per_minute=60,
+    max_consecutive_failures=3,
+    enable_health_check=True,
+)
+
+# Use with analytics engine
+engine = AsyncAnalyticsEngine(proxy_rotator=proxy_rotator)
+```
+
+See **[PROXY_SETUP.md](PROXY_SETUP.md)** for complete documentation.
+
+## WebSocket Testing
+
+Test real-time price streaming using yfinance WebSocket API.
+
+### Quick Test
+
 ```bash
-python example_batch_monitoring.py
+python test_websocket.py
 ```
 
-This demonstrates:
-1. Batch monitoring with weighted preferred tickers (3x weight)
-2. Rotation through large ticker lists over multiple iterations
-3. Comparing batch mode vs full fetch mode
+This will:
+- Connect to Yahoo Finance WebSocket
+- Stream real-time price updates for AAPL, GOOGL, MSFT, NVDA, META
+- Show price, change %, volume for ~30 seconds or 50 messages
+- Fall back to polling mode if WebSocket unavailable
 
-**Perfect for monitoring 1000+ stocks:** Fetch 100 stocks per iteration with preferred stocks appearing 3x more frequently. Your watchlist stays ultra-fresh while still covering the entire market.
+### Expected Output
 
-### Other Examples
-- `example_sentiment.py` - Sentiment analysis integration
-- `test_rate_limiting.py` - Token bucket rate limiting demonstration
-- `test_preferred_tickers.py` - Unit tests for prioritization logic
-- `test_batch_monitoring.py` - Unit tests for batch weighting logic (3x preferred)
-- `test_sentiment_unit.py` - Unit tests for sentiment analysis
+```
+✅ WebSocket connected!
+📡 Listening for real-time updates...
 
-## Limitations
+📊 AAPL: $178.45 (+1.23%) Vol: 12,345,678 @ 14:23:45
+📊 GOOGL: $142.67 (+0.89%) Vol: 8,901,234 @ 14:23:46
+📊 MSFT: $412.34 (+2.11%) Vol: 15,678,901 @ 14:23:47
+...
+```
 
-- **Rate limits**: Yahoo Finance has rate limits (~20-30 req/s). Adjust `max_concurrent` if needed.
-- **Data quality**: Relies on Yahoo Finance data availability and accuracy
-- **No caching**: Designed for real-time use. Add caching layer if needed.
-- **US stocks focus**: Optimized for US markets. Chinese A-shares use different fetchers.
+### Requirements
 
-## Future Enhancements
+- yfinance >= 1.3.0 (WebSocket support)
+- Market hours (9:30 AM - 4:00 PM ET, weekdays)
+- Outside market hours, falls back to polling mode
 
-Potential improvements:
-- Add Redis/database caching layer
-- Support for options data
-- Real-time streaming quotes (WebSocket)
-- Portfolio analytics (correlation, diversification)
-- Technical indicators (RSI, MACD, Bollinger Bands)
+### SSL Certificate Issues
 
-## License
+If you get SSL certificate errors on macOS:
 
-Part of the Palantir Trading Engine project.
+```bash
+# Fix SSL certificates
+/Applications/Python\ 3.12/Install\ Certificates.command
+
+# Or use certifi
+pip install certifi
+```
