@@ -1,0 +1,12 @@
+# Core dependencies
+yfinance>=0.2.40
+pandas>=2.0.0
+requests>=2.28.0
+certifi>=2023.0.0  # SSL certificates for WebSocket connections
+curl-cffi>=0.6.0  # Required by yfinance for proxy support
+
+# Optional: Kafka integration (uncomment if using --kafka flag)
+# confluent-kafka>=2.0.0
+
+# Optional: Sentiment analysis with LLM (uncomment if using --sentiment-analyzer llm)
+# openai>=1.0.0

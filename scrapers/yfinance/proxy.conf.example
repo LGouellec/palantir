@@ -1,0 +1,16 @@
+# Proxy Configuration Example
+#
+# One proxy per line in the format:
+# http://host:port
+# or with authentication:
+# http://username:password@host:port
+#
+# Lines starting with # are ignored
+
+# Example proxies (replace with your actual proxies)
+http://proxy1.example.com:8080
+http://proxy2.example.com:8080
+http://user:pass@proxy3.example.com:8080
+
+# You can also use SOCKS proxies
+# socks5://proxy4.example.com:1080

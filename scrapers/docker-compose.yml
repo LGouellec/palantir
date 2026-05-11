@@ -87,6 +87,34 @@ services:
     networks:
       - scraper-network
 
+  yfinance-scraper:
+    build:
+      context: ./yfinance
+      dockerfile: Dockerfile
+    container_name: yfinance-scraper
+    depends_on:
+      kafka:
+        condition: service_started
+    restart: unless-stopped
+    command: python runner.py --kafka
+    environment:
+      # Preferred tickers
+      - PREFERED_TICKERS_PATH=/app/top_stocks.txt
+      # Kafka configuration
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=stock-updates
+      # OpenAI API key for sentiment analysis (optional)
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # Timezone
+      - TZ=UTC
+    volumes:
+      # Mount custom preferred tickers list (optional)
+      - ./yfinance/top_stocks.txt:/app/top_stocks.txt:ro
+      # Mount Kafka config if using properties file (optional)
+      # - ./kafka.properties:/app/kafka.properties:ro
+    networks:
+      - scraper-network
+  
   kafka:
     image: confluentinc/cp-server:8.2.0
     hostname: kafka

@@ -1,0 +1,49 @@
+# Kafka Producer Configuration
+# Set KAFKA_CONFIG_PATH environment variable to use this file:
+# export KAFKA_CONFIG_PATH=/path/to/kafka.properties
+
+# Broker Configuration
+bootstrap.servers=localhost:9092
+
+# Compression
+compression.type=gzip
+
+# Acknowledgments (all = wait for all replicas, 1 = wait for leader only, 0 = no wait)
+acks=all
+
+# Retries
+retries=3
+
+# Idempotence (exactly-once semantics)
+enable.idempotence=true
+
+# Client identification
+client.id=yfinance-analytics-engine
+
+# Batching
+# batch.size=16384
+# linger.ms=100
+
+# Buffer memory
+# buffer.memory=33554432
+
+# Request timeout
+# request.timeout.ms=30000
+
+# Delivery timeout
+# delivery.timeout.ms=120000
+
+# Max in-flight requests
+# max.in.flight.requests.per.connection=5
+
+# Security (uncomment and configure as needed)
+# security.protocol=SASL_SSL
+# sasl.mechanism=PLAIN
+# sasl.username=your-username
+# sasl.password=your-password
+
+# SSL Configuration (if using SSL)
+# ssl.ca.location=/path/to/ca-cert
+# ssl.certificate.location=/path/to/client-cert
+# ssl.key.location=/path/to/client-key
+# ssl.key.password=your-key-password
