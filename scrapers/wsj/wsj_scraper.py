@@ -290,16 +290,17 @@ class WSJScraper:
 
     def by_pass_captcha(self, page:Page):
         
-        page.wait_for_load_state("domcontentloaded")
+        # page.wait_for_load_state("domcontentloaded")
 
         if page.locator('div.css-jzm21u-MastHeadContainer.e1mkna771').count() > 0:
             self.logger.info("Skip captcha bypass ...")
+            # Disabling for now, it's buggy
             # 25% random movement in the page to simulate real human read
-            if random.random() < 0.25:
-                self.simulator.random_mouse_movements(10)
-                page.wait_for_timeout(random.randint(500, 2000))
-                page.mouse.wheel(0, random.randint(200, 800))
-            return
+            # if random.random() < 0.25:
+            #     self.simulator.random_mouse_movements(10)
+            #     page.wait_for_timeout(random.randint(500, 2000))
+            #     page.mouse.wheel(0, random.randint(200, 800))
+            # return
 
         self.logger.info("Captcha is triggered. Try to disable it automatically ...")
         page.screenshot(path=f'./data/images/screenshot-init.png', full_page=True)
@@ -351,11 +352,12 @@ class WSJScraper:
         page.screenshot(path=f'./data/images/screenshot-iframe-after2.png', full_page=True)
 
         page.wait_for_selector('div.css-jzm21u-MastHeadContainer.e1mkna771')
+        # Disabling for now, it's buggy
          # 25% random movement in the page to simulate real human read
-        if random.random() < 0.25:
-            self.simulator.random_mouse_movements(10)
-            page.wait_for_timeout(random.randint(500, 2000))
-            page.mouse.wheel(0, random.randint(200, 800))
+        # if random.random() < 0.25:
+        #     self.simulator.random_mouse_movements(10)
+        #     page.wait_for_timeout(random.randint(500, 2000))
+        #     page.mouse.wheel(0, random.randint(200, 800))
         page.screenshot(path=f'./data/images/screenshot-final.png', full_page=True)        
         self.simulator.reset_position()
 
@@ -925,9 +927,9 @@ class WSJScraper:
                         proxy=proxy,
                         headless=self.headless,
                         network_idle=True,
-                        google_search=True,
+                        google_search=False,
                         load_dom=True,
-                        cookies=self.session_cookies,
+                        #cookies=self.session_cookies,
                         user_data_dir="./chrome",
                         allow_webgl=True,
                         hide_canvas=False,
