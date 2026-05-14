@@ -11,14 +11,18 @@ import logging
 import random
 from time import sleep
 import os
+import sys
 import base64
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
 
+# Add parent directory to path for common module imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 import requests
 from stt.audio_transcriber import AudioTranscriber
-from mouvement.human import HumanMouseSimulator
+from common.mouvement.human import HumanMouseSimulator
 from playwright.sync_api import Page
 from scrapling.core._types import SetCookieParam
 from scrapling.fetchers import StealthyFetcher
@@ -47,6 +51,7 @@ class WSJScraper:
         self.fingerprints = FingerprintGenerator()
         self.fingerprint = self.fingerprints.generate()
         injectFingerPrintStr = InjectFunction(self.fingerprint)
+
         # Disable for now
         # self.tempFingerPrint = tempfile.NamedTemporaryFile(mode='w+t', delete=False)
         # self.tempFingerPrint.write(injectFingerPrintStr)
@@ -58,7 +63,6 @@ class WSJScraper:
         self.headless = headless
         self.verbose = verbose
         self.history_file = Path(history_file)
-        self.lastFetch401=True
         # Load Kafka configuration from file
         self.kafka_config: Optional[KafkaConfig] = None
         if kafka_config_file or Path("kafka_config.properties").exists():
@@ -95,7 +99,11 @@ class WSJScraper:
             self.logger.setLevel(logging.WARNING)
 
         self.audio_transcribe = AudioTranscriber(self.logger)
-        
+
+        # 403/401 error tracking for auto-recovery
+        self.consecutive_error_count = 0
+        self.max_consecutive_errors = 3
+
         # Initialize Kafka producer if enabled
         if kafka_enabled:
             self._init_kafka()
@@ -268,29 +276,42 @@ class WSJScraper:
                 self.logger.error(f"Error closing Kafka producer: {e}")
 
     def load_tracking_mouse(self, page:Page):
+        """Initialize mouse simulator - runs BEFORE page navigation"""
+        # Only create the simulator, don't call page.evaluate() yet
         self.simulator = HumanMouseSimulator(page, self.logger)
-        
-        self.simulator.enable_mouse_tracking()
-        self.logger.info(f'Webdriver used : {page.evaluate("navigator.webdriver")}')
-        self.logger.info(f'User-Agent : {page.evaluate("navigator.userAgent")}')
-        self.logger.info(f'Plugins length : {page.evaluate("navigator.plugins.length")}')
-        self.logger.info(f'Navigator Languages : {page.evaluate("navigator.languages")}')
-        self.logger.info(f'Battery : {page.evaluate("navigator.getBattery")}')
-        self.logger.info(page.evaluate("""
-            (() => {
-                const canvas = document.createElement('canvas');
-                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-                if (!gl) return "NO_WEBGL";
-                return {
-                    vendor: gl.getParameter(gl.VENDOR),
-                    renderer: gl.getParameter(gl.RENDERER)
-                };
-            })()
-            """))
+
+    def log_browser_info(self, page:Page):
+        """Log browser fingerprint info - runs AFTER page loads"""
+        try:
+             # Now we can safely enable tracking and log info after page loads
+            self.simulator.enable_mouse_tracking()
+            self.logger.info(f'Webdriver used : {page.evaluate("navigator.webdriver")}')
+            self.logger.info(f'User-Agent : {page.evaluate("navigator.userAgent")}')
+            self.logger.info(f'Plugins length : {page.evaluate("navigator.plugins.length")}')
+            self.logger.info(f'Navigator Languages : {page.evaluate("navigator.languages")}')
+            # self.logger.info(f'Battery : {page.evaluate("navigator.getBattery")}')
+            self.logger.info(page.evaluate("""
+                (() => {
+                    const canvas = document.createElement('canvas');
+                    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                    if (!gl) return "NO_WEBGL";
+                    return {
+                        vendor: gl.getParameter(gl.VENDOR),
+                        renderer: gl.getParameter(gl.RENDERER)
+                    };
+                })()
+                """))
+        except Exception as e:
+            self.logger.warning(f"Failed to log browser info: {e}")
 
     def by_pass_captcha(self, page:Page):
+        """Runs AFTER page navigation - handle captchas and log browser info"""
+        page.wait_for_load_state("domcontentloaded")
         
-        # page.wait_for_load_state("domcontentloaded")
+        # page.pause()  # Debugging command - do not use in production
+
+        # Log browser info now that page is loaded
+        self.log_browser_info(page)
 
         if page.locator('div.css-jzm21u-MastHeadContainer.e1mkna771').count() > 0:
             self.logger.info("Skip captcha bypass ...")
@@ -906,19 +927,72 @@ class WSJScraper:
         print(f"   Total in history: {len(self.scraped_history)}")
         print(f"   History file: {self.history_file.absolute()}")
 
+    def _cleanup_browser_context(self) -> None:
+        """
+        Cleanup browser context after consecutive 403/401 errors.
+        Deletes user data directory and terminates Playwright processes.
+        """
+        import subprocess
+        import shutil
+
+        self.logger.debug("Cleaning browser context after consecutive errors")
+        print(f"🧹 [DEBUG] Cleaning browser context after {self.consecutive_error_count} consecutive errors")
+
+        # Delete user data directory
+        user_data_dir = Path("./chrome")
+        if user_data_dir.exists():
+            try:
+                shutil.rmtree(user_data_dir)
+                self.logger.debug(f"Deleted user data directory: {user_data_dir}")
+                print(f"[DEBUG] Deleted user data directory: {user_data_dir}")
+            except Exception as e:
+                self.logger.error(f"Failed to delete user data directory: {e}")
+                print(f"[ERROR] Failed to delete user data directory: {e}")
+
+        # Terminate Playwright processes gracefully
+        # Check if pgrep/pkill are available (not available in some Docker images)
+        try:
+            pgrep_check = subprocess.run(['which', 'pgrep'], capture_output=True, timeout=5)
+            pgrep_available = pgrep_check.returncode == 0
+
+            if pgrep_available:
+                # Try graceful shutdown first (SIGTERM)
+                self.logger.debug("Terminating Playwright processes (graceful shutdown)")
+                print("[DEBUG] Terminating Playwright processes (graceful shutdown)...")
+                subprocess.run(['pkill', '-15', '-f', 'playwright'], capture_output=True, timeout=5)
+
+                # Wait a bit for graceful shutdown
+                time.sleep(2)
+
+                # Check if processes still exist
+                check_result = subprocess.run(['pgrep', '-f', 'playwright'], capture_output=True, timeout=5)
+
+                if check_result.returncode == 0:
+                    # Processes still running, force kill
+                    self.logger.debug("Sending SIGKILL to remaining processes")
+                    print("[DEBUG] Sending SIGKILL to remaining processes...")
+                    subprocess.run(['pkill', '-9', '-f', 'playwright'], capture_output=True, timeout=5)
+
+                self.logger.debug("Process cleanup completed")
+                print("[DEBUG] Process cleanup completed")
+            else:
+                self.logger.debug("pgrep/pkill not available, skipping process cleanup")
+                print("[DEBUG] pgrep/pkill not available (Docker?), skipping process cleanup")
+
+        except Exception as e:
+            self.logger.error(f"Process cleanup error: {e}")
+            print(f"[DEBUG] Process cleanup error: {e}")
+
+        # Reset consecutive error count after cleanup
+        self.consecutive_error_count = 0
+        print("✅ Browser context cleaned, restarting with fresh session...")
+
     def fetch(self, url: str = None) -> Response:     
         retry = True
         proxy = os.getenv('HTTP_PROXY', None)
         self.logger.info(f"Using HTTP Proxy {proxy}")
     
         while retry == True:
-
-            # if self.lastFetch401:
-            #     self.logger.info(f'Trying to inject a fake fetched cookie : ')
-            #     c = self.fetch_cookie()
-            #     if c is not None:
-            #         self.session_cookies = []
-            #         self.session_cookies.append(c)
                 
             response = StealthyFetcher.fetch(
                         url,
@@ -929,7 +1003,7 @@ class WSJScraper:
                         network_idle=True,
                         google_search=False,
                         load_dom=True,
-                        #cookies=self.session_cookies,
+                        cookies=self.session_cookies,
                         user_data_dir="./chrome",
                         allow_webgl=True,
                         hide_canvas=False,
@@ -940,13 +1014,24 @@ class WSJScraper:
             if response.cookies:
                 self.session_cookies = response.cookies
 
-            if response.status == 401:
-                # captcha enabled, need to retry
-                print(f"Retry fetching {url} due captcha enabled")
+            if response.status == 401 or response.status == 403:
+                # Track consecutive errors
+                self.consecutive_error_count += 1
+                self.logger.warning(f"HTTP {response.status} detected ({self.consecutive_error_count}/{self.max_consecutive_errors})")
+                print(f"⚠️  [DEBUG] HTTP {response.status} detected ({self.consecutive_error_count}/{self.max_consecutive_errors})")
+
+                # Trigger cleanup after max consecutive errors
+                if self.consecutive_error_count >= self.max_consecutive_errors:
+                    self.logger.warning(f"Reached {self.max_consecutive_errors} consecutive {response.status} errors, triggering cleanup...")
+                    print(f"⚠️  [DEBUG] HTTP {response.status} detected ({self.consecutive_error_count}/{self.max_consecutive_errors}) - triggering cleanup...")
+                    self._cleanup_browser_context()
+
+                # Retry after delay
+                print(f"Retry fetching {url} due to HTTP {response.status}")
                 time.sleep(random.uniform(2, 5))
-                self.lastFetch401 = True
-            elif response.status == 200 or response.status == 404:                
-                self.lastFetch401 = False
+            elif response.status == 200 or response.status == 404:
+                # Reset consecutive error count on successful response
+                self.consecutive_error_count = 0
                 return response
             else:
                 print(f"Retry fetching {url} due to a bad status code (HTTP:{response.status})")

@@ -40,35 +40,35 @@ class HumanMouseSimulator:
 
     def enable_mouse_tracking(self):
         """Enable mouse position tracking in the page and all frames."""
-        script = """
-            window._mouseX = 0;
-            window._mouseY = 0;
-            window.addEventListener('mousemove', e => {
-                window._mouseX = e.clientX;
-                window._mouseY = e.clientY;
-                //console.log(window._mouseX + "," + window._mouseY)
-            }, true);
-        """
+        # script = """
+        #     window._mouseX = 0;
+        #     window._mouseY = 0;
+        #     window.addEventListener('mousemove', e => {
+        #         window._mouseX = e.clientX;
+        #         window._mouseY = e.clientY;
+        #         //console.log(window._mouseX + "," + window._mouseY)
+        #     }, true);
+        # """
 
-        # Inject into main page
-        self.page.add_init_script(script)
-        self.page.evaluate(script)
+        # # Inject into main page
+        # self.page.add_init_script(script)
+        # self.page.evaluate(script)
 
-        # Inject into existing iframes
-        for frame in self.page.frames:
-            try:
-                frame.evaluate(script)
-            except:
-                pass
+        # # Inject into existing iframes
+        # for frame in self.page.frames:
+        #     try:
+        #         frame.evaluate(script)
+        #     except:
+        #         pass
 
-        # Inject into future iframes
-        def on_frame_attached(frame):
-            try:
-                frame.evaluate(script)
-            except:
-                pass
+        # # Inject into future iframes
+        # def on_frame_attached(frame):
+        #     try:
+        #         frame.evaluate(script)
+        #     except:
+        #         pass
 
-        self.page.on("frameattached", on_frame_attached)
+        # self.page.on("frameattached", on_frame_attached)
 
         # Force initialization to last known position
         self.page.mouse.move(self.last_position["x"], self.last_position["y"])
@@ -433,7 +433,7 @@ class HumanMouseSimulator:
         # Real mouse up
         self.page.mouse.up()
 
-    def click(self, locator: Locator, shaky_hand: bool = True):
+    def click(self, locator: Locator, shaky_hand: bool = True, keep_down=False):
         """
         Move the mouse to the locator using human-like movement,
         then perform a real click (mouse.down + mouse.up).
@@ -470,7 +470,8 @@ class HumanMouseSimulator:
         # Real click
         self.page.mouse.down()
         time.sleep(random.uniform(0.03, 0.08))  # human click duration
-        self.page.mouse.up()
+        if not keep_down:
+            self.page.mouse.up()
 
     def human_delay(self, base, jitter_ratio=0.3, min_delay=0.05):
         jitter = base * jitter_ratio

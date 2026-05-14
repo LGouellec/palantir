@@ -2,6 +2,8 @@ infra/
 kafka_config.properties
 TODO.md 
 chrome/
+chrome_seeking/
+seeking_cookies.json
 
 # Output directories
 articles/
