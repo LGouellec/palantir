@@ -194,8 +194,8 @@ services:
       # Stealth mode and authentication
       - STEALTH_MODE=true
       - HEADLESS=true
-      - SEEKING_ALPHA_EMAIL=sylvain.legouellec@gmail.com
-      - SEEKING_ALPHA_PASSWORD=SeekingAlpha2026?!
+      - SEEKING_ALPHA_EMAIL=XXXX
+      - SEEKING_ALPHA_PASSWORD=YYYY
 
       # History configuration
       - HISTORY_FILE=/app/history/scraped_history.json
