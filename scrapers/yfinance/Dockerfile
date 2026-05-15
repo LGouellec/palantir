@@ -49,6 +49,10 @@ COPY --from=builder /root/.local /home/appuser/.local
 # Copy application code
 COPY --chown=appuser:appuser . /app/
 
+# Copy entrypoint script
+COPY entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 # Create required directories
 RUN mkdir -p /app/.nasdaq_cache && \
     chown -R appuser:appuser /app/.nasdaq_cache
@@ -59,6 +63,17 @@ USER appuser
 # Add local binaries to PATH
 ENV PATH=/home/appuser/.local/bin:$PATH
 
+# Environment variables with defaults
+ENV KAFKA_ENABLED=false \
+    KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+    KAFKA_TOPIC=stock-updates \
+    BATCH_SIZE=50 \
+    INTERVAL_MS=30000 \
+    INCLUDE_NEWS=true \
+    ANALYZE_SENTIMENT=true \
+    NEWS_DAYS=20 \
+    SENTIMENT_ANALYZER=keyword
+
 # Expose port (if needed for future HTTP endpoints)
 # EXPOSE 8000
 
@@ -66,9 +81,8 @@ ENV PATH=/home/appuser/.local/bin:$PATH
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "from analytics_engine import AsyncAnalyticsEngine" || exit 1
 
-# Default command: run the runner
-CMD ["python", "runner.py"]
+# Use entrypoint script
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
-# Alternative entrypoints (uncomment as needed):
-# CMD ["python", "example_nasdaq_monitoring.py"]
-# CMD ["python", "example_batch_monitoring.py"]
+# Default command: run with environment-based configuration
+CMD []

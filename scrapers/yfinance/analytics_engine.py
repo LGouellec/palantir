@@ -1253,6 +1253,17 @@ class AsyncAnalyticsEngine:
 
                 logger.info(f"Refresh complete: {successful} OK, {failed} errors ({elapsed:.2f}s)")
 
+                # Check if failure rate is above 50% - if so, wait 1 minute to give API breathing room
+                if len(results) > 0:
+                    failure_rate = failed / len(results)
+                    if failure_rate > 0.5:
+                        logger.warning(
+                            f"⚠️  High failure rate: {failure_rate:.1%} ({failed}/{len(results)}) - "
+                            f"waiting 60 seconds to give API breathing room..."
+                        )
+                        await asyncio.sleep(60)
+                        logger.info("✅ Cooldown complete - resuming normal operation")
+
             except Exception as e:
                 logger.error(f"Monitor loop error: {e}")
 

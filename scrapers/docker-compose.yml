@@ -96,14 +96,21 @@ services:
       kafka:
         condition: service_started
     restart: unless-stopped
-    command: python runner.py --kafka
     environment:
       # Preferred tickers
       - PREFERED_TICKERS_PATH=/app/top_stocks.txt
       # Kafka configuration
+      - KAFKA_ENABLED=true
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - KAFKA_TOPIC=stock-updates
-      # OpenAI API key for sentiment analysis (optional)
+      # YFinance engine configuration
+      - BATCH_SIZE=50
+      - INTERVAL_MS=30000
+      - INCLUDE_NEWS=true
+      - ANALYZE_SENTIMENT=true
+      - NEWS_DAYS=20
+      - SENTIMENT_ANALYZER=keyword
+      # OpenAI API key for LLM sentiment analysis (optional)
       # - OPENAI_API_KEY=${OPENAI_API_KEY}
       # Timezone
       - TZ=UTC
@@ -114,7 +121,41 @@ services:
       # - ./kafka.properties:/app/kafka.properties:ro
     networks:
       - scraper-network
-  
+
+  investing-scraper:
+    build:
+      context: ./investing
+      dockerfile: Dockerfile
+    container_name: investing-scraper
+    depends_on:
+      kafka:
+        condition: service_started
+    restart: unless-stopped
+    environment:
+      # Investing.com configuration
+      - CATEGORY=economic-indicators
+      - ANALYSIS=false  # Set to true to scrape from /analysis/ instead of /news/
+      # Kafka configuration
+      - KAFKA_ENABLED=true
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=investing-articles
+      # Scraper settings
+      - HEADLESS=true
+      - LIMIT=50
+      - DELAY=2.0
+      - CONTINUOUS=true
+      - CONTINUOUS_INTERVAL=300
+      - VERBOSE=true
+      # Timezone
+      - TZ=UTC
+    volumes:
+      # Mount history directory for persistent de-duplication
+      - ./investing/history:/app/history
+      # Mount news directory if saving locally
+      - ./investing/news:/app/news
+    networks:
+      - scraper-network
+
   kafka:
     image: confluentinc/cp-server:8.2.0
     hostname: kafka
