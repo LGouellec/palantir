@@ -543,16 +543,21 @@ class SeekingScraperStealth(SeekingScraperBase):
 
         Returns:
             List of article dictionaries with metadata (not already scraped)
+
+        Note:
+            Pagination stops at page 15 to avoid excessive scraping,
+            even if the limit hasn't been reached.
         """
         all_articles = []
         page_number = 1
         page_size = 50  # API max per page
+        max_pages = 15  # Maximum pages to scrape to avoid excessive pagination
         skipped_count = 0
 
         self.logger.info(f"Fetching articles from SeekingAlpha API (category: {self.category})")
         print(f"📄 Fetching articles from SeekingAlpha API (category: {self.category})...")
 
-        while len(all_articles) < limit:
+        while len(all_articles) < limit and page_number <= max_pages:
             try:
                 # Fetch page from API
                 articles = self._base_fetch_articles_from_api(page_number, page_size)
@@ -586,6 +591,12 @@ class SeekingScraperStealth(SeekingScraperBase):
 
                 # Move to next page
                 page_number += 1
+
+                # Check if we've hit the page limit
+                if page_number > max_pages:
+                    self.logger.info(f"Reached maximum page limit ({max_pages}), stopping pagination")
+                    print(f"⚠️  Reached maximum page limit ({max_pages})")
+                    break
 
                 # Small delay between pages
                 time.sleep(1.0)

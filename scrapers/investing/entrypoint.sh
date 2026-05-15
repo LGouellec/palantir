@@ -7,12 +7,17 @@ if [ "$#" -gt 0 ]; then
 fi
 
 # Build command from environment variables
-CMD="python seeking_scraper.py"
+CMD="python investing_scraper_stealth.py"
 
 # Required args
 CMD="$CMD --category ${CATEGORY}"
 CMD="$CMD --limit ${LIMIT}"
 CMD="$CMD --delay ${DELAY}"
+
+# Analysis mode
+if [ "${ANALYSIS}" = "true" ]; then
+    CMD="$CMD --analysis"
+fi
 
 # Continuous mode
 if [ "${CONTINUOUS}" = "true" ]; then
@@ -59,22 +64,9 @@ if [ -n "${FORMAT}" ]; then
     CMD="$CMD --format ${FORMAT}"
 fi
 
-# Stealth mode configuration
-if [ "${STEALTH_MODE}" = "true" ]; then
-    CMD="$CMD --stealth"
-fi
-
+# Headless mode configuration
 if [ "${HEADLESS}" = "false" ]; then
     CMD="$CMD --no-headless"
-fi
-
-# Login credentials for authenticated access
-if [ -n "${SEEKING_ALPHA_EMAIL}" ]; then
-    CMD="$CMD --login-email ${SEEKING_ALPHA_EMAIL}"
-fi
-
-if [ -n "${SEEKING_ALPHA_PASSWORD}" ]; then
-    CMD="$CMD --login-password ${SEEKING_ALPHA_PASSWORD}"
 fi
 
 # History TTL configuration
