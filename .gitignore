@@ -3,6 +3,8 @@ kafka_config.properties
 TODO.md 
 chrome/
 chrome_investing/
+chrome_seeking/
+seeking_cookies.json
 
 # Output directories
 articles/
