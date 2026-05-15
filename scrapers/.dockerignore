@@ -26,23 +26,28 @@ ENV/
 *.swo
 .DS_Store
 
-# Data directories (don't include in image)
-data/
-articles/
-*.json
-*.csv
-*.mitm
-*.har
+# Data directories at root (don't include in image)
+/data/
+/articles/
+/logs/
+
+# Scraped output files (but keep config files)
+scraped_history*.json
+*_articles/
+output/
 
 # Logs
 *.log
-logs/
 
 # Documentation
 *.md
 !README.md
+!**/README.md
 
-# Docker
-Dockerfile
-docker-compose*.yml
-.dockerignore
+# Docker files at root
+/Dockerfile
+/docker-compose*.yml
+/.dockerignore
+
+# Specific subdirectory .dockerignore files (not needed with parent context)
+**/.dockerignore

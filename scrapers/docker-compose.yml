@@ -1,44 +1,74 @@
 services:
-  # Coordinator - discovers URLs and pushes to Redis
+  # Coordinator - discovers URLs and pushes to Kafka
   coordinator:
     build:
-      context: ./wsj
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: wsj/Dockerfile
     container_name: wsj-coordinator
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    extra_hosts:
+      - "www.wsj.com:18.238.238.120"
+      - "wsj.com:18.238.238.120"
+    networks:
+      - scraper-network
     environment:
+      # Distributed options
       POD_INDEX: 0
       TOTAL_PODS: 4  # 1 coordinator + 3 workers
       DISTRIBUTION: kafka
-      KAFKA_ENABLED: true
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      COORDINATOR_POD: 0
+      KAFKA_URLS_TOPIC: wsj-urls
+      KAFKA_URLS_GROUP: wsj-scraper-workers
+
+      # Scraper options
       BASE_URL: https://www.wsj.com/world
       LIMIT: 30
       DELAY: 2.0
       VERBOSE: "true"
-    command: wsj_scraper_distributed.py --verbose
+      HEADLESS: "true"
+
+      # Kafka publishing (for scraped articles)
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: wsj-articles
+
+      # Timezone
+      TZ: UTC
     volumes:
       - ./images/coordinator:/app/data/images
     depends_on:
       kafka:
         condition: service_started
-    networks:
-      - scraper-network
 
   # Worker 1
   worker1:
     build:
-      context: ./wsj
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: wsj/Dockerfile
     container_name: wsj-worker1
     environment:
+      # Distributed options
       POD_INDEX: 1
       TOTAL_PODS: 4
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      KAFKA_ENABLED: true
-      KAFKA_TOPIC: wsj-articles
       DISTRIBUTION: kafka
+      KAFKA_URLS_TOPIC: wsj-urls
+      KAFKA_URLS_GROUP: wsj-scraper-workers
+
+      # Scraper options
       DELAY: 2.0
-    command: wsj_scraper_distributed.py --verbose
+      VERBOSE: "true"
+      HEADLESS: "true"
+
+      # Kafka publishing (for scraped articles)
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: wsj-articles
+
+      # Timezone
+      TZ: UTC
     depends_on:
       kafka:
         condition: service_started
@@ -48,18 +78,29 @@ services:
   # Worker 2
   worker2:
     build:
-      context: ./wsj
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: wsj/Dockerfile
     container_name: wsj-worker2
     environment:
+      # Distributed options
       POD_INDEX: 2
       TOTAL_PODS: 4
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      KAFKA_ENABLED: true
-      KAFKA_TOPIC: wsj-articles
       DISTRIBUTION: kafka
+      KAFKA_URLS_TOPIC: wsj-urls
+      KAFKA_URLS_GROUP: wsj-scraper-workers
+
+      # Scraper options
       DELAY: 2.0
-    command: wsj_scraper_distributed.py --verbose
+      VERBOSE: "true"
+      HEADLESS: "true"
+
+      # Kafka publishing (for scraped articles)
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: wsj-articles
+
+      # Timezone
+      TZ: UTC
     depends_on:
       kafka:
         condition: service_started
@@ -69,18 +110,29 @@ services:
   # Worker 3
   worker3:
     build:
-      context: ./wsj
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: wsj/Dockerfile
     container_name: wsj-worker3
     environment:
+      # Distributed options
       POD_INDEX: 3
       TOTAL_PODS: 4
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      KAFKA_ENABLED: true
-      KAFKA_TOPIC: wsj-articles
       DISTRIBUTION: kafka
+      KAFKA_URLS_TOPIC: wsj-urls
+      KAFKA_URLS_GROUP: wsj-scraper-workers
+
+      # Scraper options
       DELAY: 2.0
-    command: wsj_scraper_distributed.py --verbose
+      VERBOSE: "true"
+      HEADLESS: "true"
+
+      # Kafka publishing (for scraped articles)
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: wsj-articles
+
+      # Timezone
+      TZ: UTC
     depends_on:
       kafka:
         condition: service_started
@@ -89,8 +141,8 @@ services:
 
   yfinance-scraper:
     build:
-      context: ./yfinance
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: yfinance/Dockerfile
     container_name: yfinance-scraper
     depends_on:
       kafka:
@@ -115,6 +167,52 @@ services:
     networks:
       - scraper-network
   
+  seeking-alpha-scraper:
+    build:
+      context: .
+      dockerfile: seeking-alpha/Dockerfile
+    container_name: seeking-alpha-scraper
+    depends_on:
+      kafka:
+        condition: service_started
+    restart: unless-stopped
+    # Remove command to use entrypoint.sh with environment variables
+    environment:
+      # Scraper configuration
+      - CATEGORY=market-news::us-economy
+      - LIMIT=100
+      - DELAY=2.0
+      - CONTINUOUS=true
+      - CONTINUOUS_INTERVAL=300
+      - VERBOSE=true
+
+      # Kafka configuration
+      - KAFKA_ENABLED=true
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=seeking-alpha-news
+
+      # Stealth mode and authentication
+      - STEALTH_MODE=true
+      - HEADLESS=true
+      - SEEKING_ALPHA_EMAIL=XXXX
+      - SEEKING_ALPHA_PASSWORD=YYYY
+
+      # History configuration
+      - HISTORY_FILE=/app/history/scraped_history.json
+      - HISTORY_TTL_DAYS=30
+
+      # Timezone
+      - TZ=UTC
+    volumes:
+      # Persist scraping history
+      - ./seeking-alpha/history:/app/history
+      # Persist browser context for login sessions
+      - ./seeking-alpha/chrome_seeking:/app/chrome_seeking
+      # Mount Kafka config if using properties file (optional)
+      # - ./kafka.properties:/app/kafka.properties:ro
+    networks:
+      - scraper-network
+
   kafka:
     image: confluentinc/cp-server:8.2.0
     hostname: kafka
