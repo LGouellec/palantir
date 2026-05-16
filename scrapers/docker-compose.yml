@@ -222,8 +222,8 @@ services:
 
   investing-scraper:
     build:
-      context: ./investing
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: investing/Dockerfile
     container_name: investing-scraper
     depends_on:
       kafka:

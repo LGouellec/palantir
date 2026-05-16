@@ -318,3 +318,23 @@ PYPL
 
 # E-commerce & Platforms
 SHOP
+
+
+
+# Photo and custom
+MXL
+LITE
+IPGP
+LASE
+SOUN
+CRWV
+PLTR
+SNDK
+AMD
+INTC
+AVGO
+QCOM
+ARM
+MRVL
+MCHP
+TSM

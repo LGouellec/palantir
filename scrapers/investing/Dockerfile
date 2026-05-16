@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy requirements
-COPY requirements.txt .
+COPY investing/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
@@ -22,23 +22,23 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN scrapling install
 
 # Copy scraper files
-COPY investing_scraper_base.py .
-COPY investing_scraper_stealth.py .
-COPY kafka_config.py .
+COPY investing/investing_scraper_base.py .
+COPY investing/investing_scraper_stealth.py .
+COPY investing/kafka_config.py .
 
 # Create directories
 RUN mkdir -p /app/news /app/history /app/chrome_investing
 
 # Copy entrypoint script
-COPY entrypoint.sh /usr/local/bin/
+COPY investing/entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Environment variables with defaults
-ENV CATEGORY=latest-news
+ENV CATEGORY=stock-market-news
 ENV ANALYSIS=false
 ENV KAFKA_ENABLED=false
 ENV KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-ENV KAFKA_TOPIC=investing-articles
+ENV KAFKA_TOPIC=investing-news
 ENV HEADLESS=true
 ENV LIMIT=20
 ENV DELAY=2.0
