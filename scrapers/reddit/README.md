@@ -22,3 +22,9 @@ What’s included in this fork
 You can find and use this Kafka‑enabled version here:
 
 [👉 LGouellec/reddit-universal-scraper](https://github.com/LGouellec/reddit-universal-scraper/tree/kafka_plugin)
+
+## Docker image
+
+Docker image with the Kafka plugin
+
+`ghcr.io/lgouellec/reddit-universal-scraper:0.0.1` 
