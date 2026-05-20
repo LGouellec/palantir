@@ -525,7 +525,7 @@ Examples:
                         default=os.getenv('BASE_URL', 'https://www.wsj.com/world'),
                        help='Base URL to scrape')
     parser.add_argument('--history-file',
-                       default=f'scraped_history_pod_{os.getenv("POD_INDEX", 0)}.json',
+                       default=f'/data/scraped_history_pod_{os.getenv("POD_INDEX", 0)}.json',
                        help='History file (default: per-pod)')
     parser.add_argument('--force', action='store_true',
                        help='Force re-scraping')
