@@ -199,7 +199,7 @@ class InvestingScraperStealth(InvestingScraperBase):
                     google_search=False,
                     proxy=proxy,
                     retries=5,
-                    timeout=20000
+                    timeout=60000
                 )
 
                 if response.status == 403 or response.status == 401:

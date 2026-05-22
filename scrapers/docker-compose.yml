@@ -5,13 +5,6 @@ services:
       context: .
       dockerfile: wsj/Dockerfile
     container_name: wsj-coordinator
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
-      - 1.1.1.1
-    extra_hosts:
-      - "www.wsj.com:18.238.238.120"
-      - "wsj.com:18.238.238.120"
     networks:
       - scraper-network
     environment:

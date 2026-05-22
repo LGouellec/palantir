@@ -257,26 +257,27 @@ class KafkaStockPublisher:
             # Transform analytics data to Kafka message
             message = self._transform_to_message(ticker, analytics)
 
-            # Sanitize message for JSON serialization
-            # This handles pandas Timestamps, DataFrames, Series, etc.
-            sanitized_message = _sanitize_for_json(message)
+            if message['has_errors'] == 0:
+                # Sanitize message for JSON serialization
+                # This handles pandas Timestamps, DataFrames, Series, etc.
+                #sanitized_message = _sanitize_for_json(message)
 
-            # Serialize to JSON
-            message_json = json.dumps(sanitized_message).encode("utf-8")
-            key = ticker.encode("utf-8")
+                # Serialize to JSON
+                message_json = json.dumps(message).encode("utf-8")
+                key = ticker.encode("utf-8")
 
-            # Produce message (synchronous)
-            self.producer.produce(
-                topic=self.topic,
-                value=message_json,
-                key=key,
-                callback=self._delivery_callback,
-            )
+                # Produce message (synchronous)
+                self.producer.produce(
+                    topic=self.topic,
+                    value=message_json,
+                    key=key,
+                    callback=self._delivery_callback,
+                )
 
-            # Poll to trigger delivery callbacks (non-blocking)
-            self.producer.poll(0)
+                # Poll to trigger delivery callbacks (non-blocking)
+                self.producer.poll(0)
 
-            self._message_count += 1
+                self._message_count += 1
 
         except BufferError:
             # Queue is full, wait and retry
