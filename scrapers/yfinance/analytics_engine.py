@@ -7,16 +7,21 @@ of large batches (100+ stocks).
 import asyncio
 import inspect
 import logging
+import os
 import random
+import sys
 import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Any, Callable, Dict, List, Optional, Union
 
+# Add parent directory to path for common package imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from data.fetcher.async_yfinance import AsyncYFinanceFetcher
 from news.fetcher.async_yfinance import AsyncYFinanceNewsFetcher
 from nasdaq_tickers import NASDAQTickerFetcher
-from proxy_rotator import ProxyRotator
+from common import ProxyRotator
 from models import (
     StockAnalytics,
     StockQuote,
@@ -155,6 +160,7 @@ class AsyncAnalyticsEngine:
         base_retry_delay: float = 1.0,
         max_retry_delay: float = 60.0,
         enable_proxy_rotation: bool = True,
+        cooldown_period: float = 60.0,
     ):
         """
         Initialize the analytics engine.
@@ -168,6 +174,9 @@ class AsyncAnalyticsEngine:
             base_retry_delay: Base delay in seconds for exponential backoff (default 1.0)
             max_retry_delay: Maximum retry delay in seconds (default 60.0)
             enable_proxy_rotation: Enable proxy rotation if proxies are configured (default True)
+            cooldown_period: Cooldown period in seconds when failure rate exceeds 50% (default 60.0)
+                This helps prevent overwhelming the API during rate limit situations.
+                Can be configured via COOLDOWN_PERIOD environment variable.
         """
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.data_fetcher = AsyncYFinanceFetcher()
@@ -184,6 +193,9 @@ class AsyncAnalyticsEngine:
         self.max_retries = max_retries
         self.base_retry_delay = base_retry_delay
         self.max_retry_delay = max_retry_delay
+
+        # Cooldown configuration
+        self.cooldown_period = float(os.environ.get("COOLDOWN_PERIOD", cooldown_period))
 
         # Proxy rotation
         self.proxy_rotator: Optional[ProxyRotator] = None
@@ -1253,15 +1265,15 @@ class AsyncAnalyticsEngine:
 
                 logger.info(f"Refresh complete: {successful} OK, {failed} errors ({elapsed:.2f}s)")
 
-                # Check if failure rate is above 50% - if so, wait 1 minute to give API breathing room
+                # Check if failure rate is above 50% - if so, wait to give API breathing room
                 if len(results) > 0:
                     failure_rate = failed / len(results)
                     if failure_rate > 0.5:
                         logger.warning(
                             f"⚠️  High failure rate: {failure_rate:.1%} ({failed}/{len(results)}) - "
-                            f"waiting 60 seconds to give API breathing room..."
+                            f"waiting {self.cooldown_period:.0f} seconds to give API breathing room..."
                         )
-                        await asyncio.sleep(60)
+                        await asyncio.sleep(self.cooldown_period)
                         logger.info("✅ Cooldown complete - resuming normal operation")
 
             except Exception as e:

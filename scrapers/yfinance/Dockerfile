@@ -48,6 +48,7 @@ COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy application code
 COPY --chown=appuser:appuser yfinance/ /app/
+COPY --chown=appuser:appuser common/ /app/common/
 
 # Copy entrypoint script
 COPY yfinance/entrypoint.sh /usr/local/bin/
@@ -72,7 +73,8 @@ ENV KAFKA_ENABLED=false \
     INCLUDE_NEWS=true \
     ANALYZE_SENTIMENT=true \
     NEWS_DAYS=20 \
-    SENTIMENT_ANALYZER=keyword
+    SENTIMENT_ANALYZER=keyword \
+    COOLDOWN_PERIOD=60
 
 # Expose port (if needed for future HTTP endpoints)
 # EXPOSE 8000
