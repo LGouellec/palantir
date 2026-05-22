@@ -476,6 +476,10 @@ class SeekingScraperBase(ABC):
         pass
 
     @abstractmethod
+    def before_scraping(self):
+        pass
+
+    @abstractmethod
     def scrape_article(self, url: str, article_metadata: Optional[Dict] = None) -> Optional[Dict]:
         """
         Scrape a single SeekingAlpha article
@@ -513,6 +517,9 @@ class SeekingScraperBase(ABC):
             continuous: If True, run in continuous mode (infinite loop)
             continuous_interval: Seconds to wait between scraping iterations (default: 300 = 5 minutes)
         """
+        self.logger.info("Call before scraping")
+        self.before_scraping()
+        
         if continuous:
             self.logger.info(f"Starting continuous scraping mode (interval: {continuous_interval}s)")
             print(f"\n🔄 Continuous mode enabled - will scrape every {continuous_interval // 60} minutes")

@@ -532,6 +532,10 @@ class SeekingScraperStealth(SeekingScraperBase):
             print(f"❌ Login failed: {e}")
             raise
 
+    def before_scraping(self):
+        # Just make sure we login before before fetching data
+        self.scrape_article("https://seekingalpha.com/", None, True)
+        
     def get_articles_with_metadata(self, limit: int = 20, filter_scraped: bool = True) -> List[Dict]:
         """
         Get articles with metadata from SeekingAlpha API using StealthyFetcher
@@ -709,7 +713,7 @@ class SeekingScraperStealth(SeekingScraperBase):
             self.logger.error(f"Error fetching from API: {e}", exc_info=self.verbose)
             raise
 
-    def scrape_article(self, url: str, article_metadata: Optional[Dict] = None) -> Optional[Dict]:
+    def scrape_article(self, url: str, article_metadata: Optional[Dict] = None, login: bool = False) -> Optional[Dict]:
         """
         Scrape a single SeekingAlpha article using StealthyFetcher
 
@@ -832,6 +836,9 @@ class SeekingScraperStealth(SeekingScraperBase):
                     self.consecutive_403_count = 0
 
             if not page:
+                return None
+            
+            if login:
                 return None
             
             # Extract title
