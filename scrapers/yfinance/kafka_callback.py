@@ -440,7 +440,7 @@ class KafkaStockPublisher:
         # This includes: dividends_history, recommendations, quarterly statements,
         # institutional holders, insider transactions, and all other info fields
         if analytics.additional_data:
-            message["additional_data"] = analytics.additional_data
+            message["additional_data"] = _sanitize_for_json(analytics.additional_data)
 
         return message
 

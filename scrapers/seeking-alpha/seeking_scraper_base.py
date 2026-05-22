@@ -330,6 +330,7 @@ class SeekingScraperBase(ABC):
                 self.api_base_url,
                 params=params,
                 headers=headers,
+                #proxy="socks5://206.123.156.225:4537",
                 impersonate="chrome119",
                 timeout=30
             )
