@@ -155,6 +155,8 @@ services:
       - ANALYZE_SENTIMENT=true
       - NEWS_DAYS=20
       - SENTIMENT_ANALYZER=keyword
+      # Rate limiting and cooldown
+      - COOLDOWN_PERIOD=60
       # OpenAI API key for LLM sentiment analysis (optional)
       # - OPENAI_API_KEY=${OPENAI_API_KEY}
       # Timezone

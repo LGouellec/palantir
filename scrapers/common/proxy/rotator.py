@@ -11,6 +11,9 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+from .fetcher import ProxyFetcher
+from .validator import ProxyValidator
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,6 +48,8 @@ class ProxyRotator:
     Environment Variables:
         PROXY_LIST: Comma-separated list of proxy URLs
         PROXY_CONFIG_PATH: Path to proxy config file (one proxy per line)
+        PROXY_AUTO_FETCH: Enable automatic proxy fetching from free lists (default: false)
+        PROXY_AUTO_FETCH_MAX: Maximum validated proxies when auto-fetching (default: 50)
         PROXY_MAX_RPM: Max requests per minute per proxy (default: 60)
         PROXY_MAX_FAILURES: Consecutive failures before marking unhealthy (default: 3)
     """
@@ -54,7 +59,9 @@ class ProxyRotator:
         proxies: Optional[List[str]] = None,
         max_requests_per_minute: int = 60,
         max_consecutive_failures: int = 3,
-        enable_health_check: bool = True,
+        enable_health_check: Optional[bool] = None,
+        auto_fetch_proxies: Optional[bool] = None,
+        auto_fetch_max_proxies: int = 50,
     ):
         """
         Initialize proxy rotator.
@@ -65,31 +72,96 @@ class ProxyRotator:
             max_requests_per_minute: Max requests per proxy per minute
             max_consecutive_failures: Failures before marking proxy as unhealthy
             enable_health_check: Enable automatic health checking
+            auto_fetch_proxies: Automatically fetch and validate proxies from free lists
+            auto_fetch_max_proxies: Maximum number of validated proxies when auto-fetching
         """
         self._proxies: Dict[str, ProxyConfig] = {}
         self._max_consecutive_failures = max_consecutive_failures
         self._enable_health_check = enable_health_check
         self._current_index = 0
         self._lock = asyncio.Lock()
+        self._auto_fetch = auto_fetch_proxies or os.environ.get("PROXY_AUTO_FETCH", "false").lower() == "true"
+        self._auto_fetch_max = int(os.environ.get("PROXY_AUTO_FETCH_MAX", auto_fetch_max_proxies))
+        self._initialized = False
+
+        # Store params for async initialization
+        self._provided_proxies = proxies
+        self._max_rpm = int(os.environ.get("PROXY_MAX_RPM", max_requests_per_minute))
+
+    async def initialize(self) -> None:
+        """
+        Async initialization of proxy rotator.
+
+        Must be called before using the rotator if auto_fetch_proxies is enabled.
+        Safe to call multiple times (idempotent).
+        """
+        if self._initialized:
+            return
 
         # Load proxies from config or environment
-        proxy_list = proxies or self._load_proxies_from_env()
+        proxy_list = self._provided_proxies or self._load_proxies_from_env()
+
+        # Auto-fetch proxies if enabled and no manual proxies provided
+        if self._auto_fetch and not proxy_list:
+            logger.info("🔄 Auto-fetching proxies from free proxy list...")
+            proxy_list = await self._fetch_and_validate_proxies()
 
         if not proxy_list:
             logger.warning("⚠️  No proxies configured - ProxyRotator disabled")
+            self._initialized = True
             return
 
         # Initialize proxy configs
-        max_rpm = int(os.environ.get("PROXY_MAX_RPM", max_requests_per_minute))
         for proxy_url in proxy_list:
             self._proxies[proxy_url] = ProxyConfig(
                 url=proxy_url,
-                max_requests_per_minute=max_rpm,
+                max_requests_per_minute=self._max_rpm,
             )
 
         logger.info(f"✅ ProxyRotator initialized with {len(self._proxies)} proxies")
-        logger.info(f"   Max requests per proxy: {max_rpm}/min")
-        logger.info(f"   Health check: {'Enabled' if enable_health_check else 'Disabled'}")
+        logger.info(f"   Max requests per proxy: {self._max_rpm}/min")
+        logger.info(f"   Health check: {'Enabled' if self._enable_health_check else 'Disabled'}")
+        logger.info(f"   Auto-fetch: {'Enabled' if self._auto_fetch else 'Disabled'}")
+
+        self._initialized = True
+
+    async def _fetch_and_validate_proxies(self) -> List[str]:
+        """
+        Fetch proxies from free list and validate them.
+
+        Returns:
+            List of validated proxy URLs
+        """
+        try:
+            # Fetch proxies from remote source
+            fetcher = ProxyFetcher()
+            proxies = await fetcher.fetch_proxies()
+
+            if not proxies:
+                logger.warning("⚠️  No proxies fetched from remote source")
+                return []
+
+            logger.info(f"📥 Fetched {len(proxies)} proxies, starting validation...")
+
+            # Validate proxies
+            validator = ProxyValidator()
+            validated_proxies = await validator.validate_proxies(
+                proxies, max_proxies=self._auto_fetch_max
+            )
+
+            if not validated_proxies:
+                logger.warning("⚠️  No working proxies found after validation")
+            else:
+                logger.info(
+                    f"✅ Validated {len(validated_proxies)} working proxies "
+                    f"out of {len(proxies)} total"
+                )
+
+            return validated_proxies
+
+        except Exception as e:
+            logger.error(f"❌ Failed to fetch and validate proxies: {e}")
+            return []
 
     def _load_proxies_from_env(self) -> List[str]:
         """
@@ -130,6 +202,10 @@ class ProxyRotator:
         Returns:
             Proxy URL or None if no proxies available
         """
+        # Ensure initialization has happened
+        if not self._initialized:
+            await self.initialize()
+
         if not self._proxies:
             return None
 
@@ -280,9 +356,39 @@ class ProxyRotator:
 
     def is_enabled(self) -> bool:
         """
-        Check if proxy rotation is enabled.
+        Check if proxy rotation is enabled or will be enabled.
+
+        Returns True if:
+        - Proxies are already loaded
+        - Proxies were provided in constructor (not yet initialized)
+        - Auto-fetch is enabled (not yet initialized)
+        - Proxies are configured via environment variables (not yet initialized)
+
+        Returns False if:
+        - Initialization completed but found no working proxies
+        - No proxy configuration provided
 
         Returns:
-            True if proxies are configured
+            True if proxies are configured or will be available
         """
-        return len(self._proxies) > 0
+        # Already have proxies loaded
+        if len(self._proxies) > 0:
+            return True
+
+        # If initialization already happened but found no proxies, disabled
+        if self._initialized:
+            return False
+
+        # Have proxies to load
+        if self._provided_proxies:
+            return True
+
+        # Will auto-fetch proxies
+        if self._auto_fetch:
+            return True
+
+        # Check environment variables
+        if os.environ.get("PROXY_LIST") or os.environ.get("PROXY_CONFIG_PATH"):
+            return True
+
+        return False

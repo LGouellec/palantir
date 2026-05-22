@@ -3,6 +3,11 @@ import asyncio
 import logging
 import os
 import signal
+import sys
+
+# Add parent directory to path for common package imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from analytics_engine import AsyncAnalyticsEngine
 from models import StockAnalytics
 from kafka_callback import KafkaStockPublisher
