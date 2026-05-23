@@ -78,7 +78,6 @@ class SeekingScraperStealth(SeekingScraperBase):
         self.headless = headless
         self.login_email = login_email
         self.login_password = login_password
-        self.session_cookies = []
         self.user_data_dir = "./chrome_seeking"  # Persistent browser context
 
         # Track consecutive 403 errors for browser context reset
@@ -514,16 +513,16 @@ class SeekingScraperStealth(SeekingScraperBase):
             except Exception as e:
                 self.logger.warning(f"Login wait warning: {e}")
 
-            # Save cookies from the browser context
-            cookies = page.context.cookies()
-            self.session_cookies = cookies
+            # Save cookies from the browser context (keep in Playwright format)
+            # They will be converted to CookieJar when needed by curl_cffi
+            self.session_cookies = page.context.cookies()
             # page.pause()
 
-            self.logger.info(f"✅ Login successful! Saved {len(cookies)} cookies")
-            print(f"✅ Login successful! Session cookies saved.")
+            self.logger.info(f"✅ Login successful! Saved {len(self.session_cookies)} cookies")
+            print(f"✅ Login successful! Session cookies saved ({len(self.session_cookies)} cookies).")
 
             # Check for captcha after login
-            if page.locator('#px-captcha-wrapper:not(.overflow-hidden)').count() > 0:
+            if page.locator('#px-captcha-wrapper:not(.overflow-hidden)').count() > 0 or page.locator('#px-captcha:not(.overflow-hidden)').count() > 0:
                 self.logger.debug("Captcha appeared after login")
                 self._bypass_perimeterx_captcha(page)
 
