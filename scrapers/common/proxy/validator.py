@@ -92,7 +92,8 @@ class ProxyValidator:
 
             if result:
                 working_proxies.append(proxy_url)
-                logger.debug(f"✅ Proxy working: {self._sanitize_url(proxy_url)}")
+                # Show immediate feedback for working proxies (INFO level)
+                logger.info(f"✅ [{len(working_proxies)}] ONLINE: {self._sanitize_url(proxy_url)}")
 
                 # Stop early if we have enough working proxies
                 if max_proxies and len(working_proxies) >= max_proxies:

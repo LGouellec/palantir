@@ -5,6 +5,7 @@ A robust proxy rotation system with automatic fetching, validation, and health c
 ## Features
 
 - **Automatic Proxy Fetching**: Download free SOCKS5 proxies from public lists
+- **Auto-Refresh**: Automatically refresh proxy list when cache is stale (>6 hours)
 - **Proxy Validation**: Test proxies before use to ensure they're working
 - **Local Caching**: Cache validated proxies with configurable TTL
 - **Round-Robin Rotation**: Distribute requests evenly across proxies
@@ -49,6 +50,45 @@ rotator = ProxyRotator(
 # Proxies are fetched and validated on first use
 proxy_url = await rotator.get_proxy()
 ```
+
+### Auto-Refresh (New!)
+
+When `auto_fetch` is enabled, the proxy list automatically refreshes when the cache is stale (>6 hours):
+
+```python
+from common import ProxyRotator
+
+# Enable auto-fetch (enables auto-refresh)
+rotator = ProxyRotator(
+    auto_fetch_proxies=True,
+    auto_fetch_max_proxies=30
+)
+
+await rotator.initialize()  # Initial fetch
+
+# After 6+ hours, next get_proxy() call will auto-refresh
+proxy = await rotator.get_proxy()  # Auto-refreshes if cache is stale
+
+# Or manually trigger a refresh anytime
+await rotator.refresh_proxies()
+
+# Check cache age
+cache_age_hours = rotator.get_cache_age() / 3600
+print(f"Cache age: {cache_age_hours:.1f} hours")
+```
+
+**How it works:**
+- Cache timestamp is set when proxies are fetched/initialized
+- Every `get_proxy()` call checks if cache is older than 6 hours
+- If stale AND `auto_fetch=True`, fetches new proxies automatically
+- Old proxies are replaced with newly validated ones
+- Cache timestamp is updated after successful refresh
+
+**Benefits:**
+- Long-running scrapers always have fresh proxies
+- Automatically recover from proxy failures over time
+- No manual intervention required
+- Configurable via `PROXY_AUTO_FETCH` environment variable
 
 ## Configuration
 

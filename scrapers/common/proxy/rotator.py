@@ -83,6 +83,8 @@ class ProxyRotator:
         self._auto_fetch = auto_fetch_proxies or os.environ.get("PROXY_AUTO_FETCH", "false").lower() == "true"
         self._auto_fetch_max = int(os.environ.get("PROXY_AUTO_FETCH_MAX", auto_fetch_max_proxies))
         self._initialized = False
+        self._cache_timestamp = 0.0  # Track when proxies were last fetched/refreshed
+        self._cache_ttl = 6 * 3600  # 6 hours in seconds
 
         # Store params for async initialization
         self._provided_proxies = proxies
@@ -122,6 +124,9 @@ class ProxyRotator:
         logger.info(f"   Max requests per proxy: {self._max_rpm}/min")
         logger.info(f"   Health check: {'Enabled' if self._enable_health_check else 'Disabled'}")
         logger.info(f"   Auto-fetch: {'Enabled' if self._auto_fetch else 'Disabled'}")
+
+        # Set cache timestamp
+        self._cache_timestamp = time.time()
 
         self._initialized = True
 
@@ -196,6 +201,10 @@ class ProxyRotator:
         """
         Get next proxy URL based on rotation strategy.
 
+        Automatically refreshes proxy list if:
+        - Cache is older than 6 hours
+        - AND auto_fetch is enabled
+
         Args:
             strategy: Rotation strategy ("round_robin", "least_used", "random")
 
@@ -205,6 +214,11 @@ class ProxyRotator:
         # Ensure initialization has happened
         if not self._initialized:
             await self.initialize()
+
+        # Check if cache is stale and auto-refresh is enabled
+        if self._auto_fetch and self._is_cache_stale():
+            logger.info("🔄 Proxy cache is stale (>6 hours), refreshing...")
+            await self._refresh_proxy_list()
 
         if not self._proxies:
             return None
@@ -264,6 +278,66 @@ class ProxyRotator:
 
         # Check if we're within the rate limit window
         return time_since_last_use < (60.0 / config.max_requests_per_minute)
+
+    def _is_cache_stale(self) -> bool:
+        """
+        Check if proxy cache is stale (older than 6 hours).
+
+        Returns:
+            True if cache is stale and needs refresh
+        """
+        if self._cache_timestamp == 0:
+            return False  # Not initialized yet
+
+        age = time.time() - self._cache_timestamp
+        return age > self._cache_ttl
+
+    async def _refresh_proxy_list(self) -> None:
+        """
+        Refresh the proxy list by fetching new proxies from free lists.
+
+        Only works if auto_fetch is enabled. Replaces existing proxies
+        with newly validated ones.
+        """
+        if not self._auto_fetch:
+            logger.warning("⚠️  Cannot refresh proxy list - auto_fetch is disabled")
+            return
+
+        logger.info("🔄 Refreshing proxy list from free proxy sources...")
+
+        try:
+            # Fetch and validate new proxies
+            new_proxies = await self._fetch_and_validate_proxies()
+
+            if not new_proxies:
+                logger.warning("⚠️  No new proxies found during refresh, keeping existing ones")
+                # Update cache timestamp anyway to avoid continuous refresh attempts
+                self._cache_timestamp = time.time()
+                return
+
+            async with self._lock:
+                # Clear old proxies
+                old_count = len(self._proxies)
+                self._proxies.clear()
+
+                # Add new proxies
+                for proxy_url in new_proxies:
+                    self._proxies[proxy_url] = ProxyConfig(
+                        url=proxy_url,
+                        max_requests_per_minute=self._max_rpm,
+                    )
+
+                # Update cache timestamp
+                self._cache_timestamp = time.time()
+
+                logger.info(
+                    f"✅ Proxy list refreshed: {old_count} old → {len(self._proxies)} new proxies"
+                )
+
+        except Exception as e:
+            logger.error(f"❌ Failed to refresh proxy list: {e}")
+            # Update timestamp to avoid immediate retry
+            self._cache_timestamp = time.time()
 
     async def mark_success(self, proxy_url: str) -> None:
         """
@@ -353,6 +427,36 @@ class ProxyRotator:
             Number of healthy proxies
         """
         return sum(1 for config in self._proxies.values() if config.healthy)
+
+    async def refresh_proxies(self) -> bool:
+        """
+        Manually trigger a proxy list refresh.
+
+        Only works if auto_fetch is enabled.
+
+        Returns:
+            True if refresh was successful, False otherwise
+        """
+        if not self._auto_fetch:
+            logger.warning("⚠️  Cannot manually refresh - auto_fetch is disabled")
+            return False
+
+        logger.info("🔄 Manual proxy refresh triggered...")
+        await self._refresh_proxy_list()
+
+        return len(self._proxies) > 0
+
+    def get_cache_age(self) -> float:
+        """
+        Get the age of the proxy cache in seconds.
+
+        Returns:
+            Age in seconds, or 0 if not initialized
+        """
+        if self._cache_timestamp == 0:
+            return 0.0
+
+        return time.time() - self._cache_timestamp
 
     def is_enabled(self) -> bool:
         """

@@ -393,13 +393,13 @@ class SeekingScraperBase(ABC):
             # Convert Playwright cookies to CookieJar for curl_cffi compatibility
             curl_cookies = convert_playwright_cookies_to_cookiejar(self.session_cookies) if self.session_cookies else None
             self.logger.info(curl_cookies)
-            
+
             response = requests.get(
                 self.api_base_url,
                 params=params,
                 cookies=curl_cookies,
                 headers=headers,
-                #proxy="socks5://206.123.156.225:4537",
+                proxy="socks5://43.165.172.131:1080",
                 impersonate="chrome119",
                 timeout=30
             )

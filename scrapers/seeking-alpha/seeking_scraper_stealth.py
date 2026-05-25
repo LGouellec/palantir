@@ -406,6 +406,7 @@ class SeekingScraperStealth(SeekingScraperBase):
                 print("⚠️  Captcha bypass may have failed")
                 # Give it one more second to disappear
                 time.sleep(2.0)
+                page.pause()
                 if page.locator('#px-captcha-wrapper').count() == 0:
                     self.logger.info("✅ Captcha bypassed successfully (delayed)!")
                     print("✅ Captcha solved!")
@@ -657,6 +658,8 @@ class SeekingScraperStealth(SeekingScraperBase):
                 headless=self.headless,
                 network_idle=True,
                 google_search=True,
+                cookies=self.session_cookies,
+                user_data_dir=self.user_data_dir,
                 timeout=10000,
                 useragent='User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
                 disable_resources=True
@@ -809,7 +812,7 @@ class SeekingScraperStealth(SeekingScraperBase):
                     'solve_cloudflare': False,
                     'proxy': proxy,
                     'page_action': ensure_content_loaded,
-                    'blocked_domains': ['collector-pxxgcxm9by.cl6.px-cloud.net', 'collector-pxxgcxm9by.px-cloud.net']
+                    #'blocked_domains': ['collector-pxxgcxm9by.cl6.px-cloud.net', 'collector-pxxgcxm9by.px-cloud.net']
                 }
 
                 # 
