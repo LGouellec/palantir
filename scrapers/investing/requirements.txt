@@ -1,3 +1,4 @@
 scrapling[fetchers]>=0.4.7
 confluent-kafka>=2.3.0
 curl-cffi>=0.7.0
+aiohttp
