@@ -658,9 +658,10 @@ class SeekingScraperStealth(SeekingScraperBase):
                 google_search=True,
                 cookies=self.session_cookies,
                 user_data_dir=self.user_data_dir,
-                timeout=10000,
+                timeout=60000,
                 useragent='User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
                 disable_resources=True,
+                block_ads=True,
                 page_action=self._bypass_perimeterx_captcha
             )
 
