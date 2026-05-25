@@ -568,10 +568,14 @@ class SeekingScraperStealth(SeekingScraperBase):
             try:
                 # Fetch page from API
                 articles = None
+                useUI = False
 
                 try:
                     articles = self._base_fetch_articles_from_api(page_number, page_size)
                 except Exception as e:
+                    useUI = True
+                
+                if not articles or useUI:
                     articles = self._fetch_articles_from_ui(page_number)
                     
                 if not articles:
