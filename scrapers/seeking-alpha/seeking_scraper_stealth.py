@@ -645,7 +645,7 @@ class SeekingScraperStealth(SeekingScraperBase):
             List of article dictionaries with metadata
         """
 
-        url = f"https://seekingalpha.com/{self.category.replace("::", "/").replace("/all", "")}?page={page_number}"
+        url = f"https://seekingalpha.com/{self.category.replace('::', '/').replace('/all', '')}?page={page_number}"
 
         try:
             self.logger.debug(f"Fetching API: {url}")
