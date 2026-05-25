@@ -324,6 +324,8 @@ class KafkaStockPublisher:
                 "market_cap": analytics.quote.market_cap or 0,
                 "volume": analytics.quote.volume or 0,
                 "avg_volume_10d": analytics.quote.avg_volume_10d or 0,
+                "avg_50d": analytics.quote.avg_50d or 0,
+                "recommendation_key": analytics.quote.recommendation_Key or "unknown"
             }
 
             # Valuation ratios
@@ -348,22 +350,23 @@ class KafkaStockPublisher:
             }
 
         # Fundamentals
-        if analytics.fundamentals:
-            message["fundamentals"] = {
-                "revenue": analytics.fundamentals.revenue or 0,
-                "revenue_growth": analytics.fundamentals.revenue_growth or 0,
-                "net_income": analytics.fundamentals.net_income or 0,
-                "profit_margin": analytics.fundamentals.profit_margin or 0,
-                "operating_margin": analytics.fundamentals.operating_margin or 0,
-                "total_debt": analytics.fundamentals.total_debt or 0,
-                "total_equity": analytics.fundamentals.total_equity or 0,
-                "debt_to_equity": analytics.fundamentals.debt_to_equity or 0,
-                "current_ratio": analytics.fundamentals.current_ratio or 0,
-                "book_value_per_share": analytics.fundamentals.book_value_per_share or 0,
-                "pb_ratio": analytics.fundamentals.pb_ratio or 0,
-                "roe": analytics.fundamentals.roe or 0,
-                "roa": analytics.fundamentals.roa or 0,
-            }
+        # Not need yet
+        # if analytics.fundamentals:
+        #     message["fundamentals"] = {
+        #         "revenue": analytics.fundamentals.revenue or 0,
+        #         "revenue_growth": analytics.fundamentals.revenue_growth or 0,
+        #         "net_income": analytics.fundamentals.net_income or 0,
+        #         "profit_margin": analytics.fundamentals.profit_margin or 0,
+        #         "operating_margin": analytics.fundamentals.operating_margin or 0,
+        #         "total_debt": analytics.fundamentals.total_debt or 0,
+        #         "total_equity": analytics.fundamentals.total_equity or 0,
+        #         "debt_to_equity": analytics.fundamentals.debt_to_equity or 0,
+        #         "current_ratio": analytics.fundamentals.current_ratio or 0,
+        #         "book_value_per_share": analytics.fundamentals.book_value_per_share or 0,
+        #         "pb_ratio": analytics.fundamentals.pb_ratio or 0,
+        #         "roe": analytics.fundamentals.roe or 0,
+        #         "roa": analytics.fundamentals.roa or 0,
+        #     }
 
         # Valuation metrics
         if analytics.valuation:
@@ -439,8 +442,9 @@ class KafkaStockPublisher:
         # Add all additional data from yfinance
         # This includes: dividends_history, recommendations, quarterly statements,
         # institutional holders, insider transactions, and all other info fields
-        if analytics.additional_data:
-            message["additional_data"] = _sanitize_for_json(analytics.additional_data)
+        # Not need in Kafka yet
+        # if analytics.additional_data:
+        #     message["additional_data"] = _sanitize_for_json(analytics.additional_data)
 
         return message
 

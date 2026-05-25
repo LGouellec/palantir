@@ -271,20 +271,22 @@ class AsyncAnalyticsEngine:
             ticker=ticker,
             name=data.get("name", ""),
             current_price=data.get("current_price"),
-            previous_close=data.get("previous_close"),
-            open_price=data.get("open_price"),
-            day_high=data.get("day_high"),
-            day_low=data.get("day_low"),
+            previous_close=data.get("previousClose"),
+            open_price=data.get("open"),
+            day_high=data.get("dayHigh"),
+            day_low=data.get("dayLow"),
+            avg_50d=data.get("fiftyDayAverage"),
             volume=data.get("volume"),
-            avg_volume_10d=data.get("avg_volume_10d"),
+            avg_volume_10d=data.get("averageVolume10days"),
             market_cap=data.get("market_cap"),
             pe_ratio=data.get("pe_ratio"),
-            eps=data.get("eps"),
+            eps=data.get("trailingEps"),
             dividend_yield=data.get("dividend_yield"),
             beta=data.get("beta"),
-            week_52_high=data.get("week_52_high"),
-            week_52_low=data.get("week_52_low"),
+            week_52_high=data.get("fiftyTwoWeekHigh"),
+            week_52_low=data.get("fiftyTwoWeekLow"),
             shares_outstanding=data.get("shares_outstanding"),
+            recommendation_Key=data.get("recommendationKey"),
         )
 
     def _build_fundamentals(self, data: Dict[str, Any]) -> Fundamentals:
@@ -538,9 +540,10 @@ class AsyncAnalyticsEngine:
 
             try:
                 # Build list of tasks to run concurrently with retry logic
+                # Avoid fetch all(), fetch to much data for now
                 tasks = [
                     self._retry_with_backoff(
-                        data_fetcher.fetch_all,
+                        data_fetcher.fetch_quote,
                         ticker,
                         operation_name=f"Data fetch for {ticker}",
                     )
