@@ -649,53 +649,58 @@ class SeekingScraperStealth(SeekingScraperBase):
 
         try:
             self.logger.debug(f"Fetching API: {url}")
+            retry = True
 
-            # Use StealthyFetcher for API requests
-            page = StealthyFetcher.fetch(
-                url,
-                headless=self.headless,
-                network_idle=True,
-                google_search=True,
-                cookies=self.session_cookies,
-                user_data_dir=self.user_data_dir,
-                timeout=60000,
-                useragent='User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
-                disable_resources=True,
-                block_ads=True,
-                page_action=self._bypass_perimeterx_captcha
-            )
+            while retry:
 
-            self.logger.debug(f"Response status: {page.status}")
+                # Use StealthyFetcher for API requests
+                page = StealthyFetcher.fetch(
+                    url,
+                    headless=self.headless,
+                    network_idle=True,
+                    google_search=True,
+                    user_data_dir=self.user_data_dir,
+                    timeout=60000,
+                    useragent='User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
+                    disable_resources=True,
+                    block_ads=True,
+                    page_action=self._bypass_perimeterx_captcha
+                )
 
-            # Check for 403 Forbidden errors
-            if page.status == 403:
-                self.consecutive_403_count += 1
-                self.logger.warning(f"API returned 403 Forbidden (consecutive: {self.consecutive_403_count}/{self.max_consecutive_403})")
+                self.logger.debug(f"Response status: {page.status}")
 
-                if self.consecutive_403_count >= self.max_consecutive_403:
-                    self._cleanup_browser_context()
+                # Check for 403 Forbidden errors
+                if page.status == 403:
+                    self.consecutive_403_count += 1
+                    self.logger.warning(f"API returned 403 Forbidden (consecutive: {self.consecutive_403_count}/{self.max_consecutive_403})")
 
-                return []
-            elif page.status != 200:
-                self.logger.error(f"API returned status {page.status}")
-                # Reset counter on other errors
+                    if self.consecutive_403_count >= self.max_consecutive_403:
+                        self._cleanup_browser_context()
+
+                    time.sleep(10)
+                    continue
+                elif page.status != 200:
+                    self.logger.error(f"API returned status {page.status}")
+                    # Reset counter on other errors
+                    self.consecutive_403_count = 0
+                    time.sleep(10)
+                    continue
+
+                retry = False
+                # Success - reset consecutive 403 counter
                 self.consecutive_403_count = 0
-                return []
 
-            # Success - reset consecutive 403 counter
-            self.consecutive_403_count = 0
+                links = page.css('a.font-bold[href^="/news/"]')
+                articles = []
 
-            links = page.css('a.font-bold[href^="/news/"]')
-            articles = []
+                for link in links:
+                    metadata = self._extract_article_link(link)
+                    if metadata:
+                        articles.append(metadata)
 
-            for link in links:
-                metadata = self._extract_article_link(link)
-                if metadata:
-                    articles.append(metadata)
+                self.logger.debug(f"Parsed {len(articles)} articles from UI")
 
-            self.logger.debug(f"Parsed {len(articles)} articles from UI")
-
-            return articles
+                return articles
 
         except Exception as e:
             self.logger.error(f"Error fetching from API: {e}", exc_info=self.verbose)
