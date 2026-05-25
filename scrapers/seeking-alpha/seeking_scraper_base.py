@@ -5,7 +5,9 @@ Contains common functionality for history management, Kafka publishing, etc.
 """
 
 import json
+import os
 import re
+import sys
 import time
 import logging
 from abc import ABC, abstractmethod
@@ -15,8 +17,11 @@ from typing import List, Dict, Optional
 from http.cookiejar import CookieJar, Cookie
 from curl_cffi import requests
 
-from kafka_config import load_kafka_config, KafkaConfig
+# Add parent directory to path for common package imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+import kafka_config as kafka_config_
+from common import ProxyRotator
 
 def convert_playwright_cookies_to_cookiejar(playwright_cookies: List[Dict]) -> CookieJar:
     """
@@ -111,10 +116,10 @@ class SeekingScraperBase(ABC):
             self.HISTORY_TTL_DAYS = history_ttl_days
 
         # Load Kafka configuration from file
-        self.kafka_config: Optional[KafkaConfig] = None
+        self.kafka_config: Optional[kafka_config_.KafkaConfig] = None
         if kafka_config_file or Path("kafka_config.properties").exists():
             try:
-                self.kafka_config = load_kafka_config(kafka_config_file)
+                self.kafka_config = kafka_config_.load_kafka_config(kafka_config_file)
             except Exception as e:
                 print(f"⚠️  Failed to load Kafka config: {e}")
                 self.kafka_config = None
@@ -152,6 +157,12 @@ class SeekingScraperBase(ABC):
         # Initialize Kafka producer if enabled
         if kafka_enabled:
             self._init_kafka()
+
+        self.proxy_rotator = ProxyRotator()
+        if self.proxy_rotator.is_enabled():
+            self.logger.info(f"🔄 Proxy rotation enabled with {self.proxy_rotator.get_healthy_count()} proxies")
+        else:
+            self.proxy_rotator = None
 
     def _cleanup_old_entries(self, history: Dict[str, str]) -> Dict[str, str]:
         """
@@ -394,13 +405,17 @@ class SeekingScraperBase(ABC):
             curl_cookies = convert_playwright_cookies_to_cookiejar(self.session_cookies) if self.session_cookies else None
             self.logger.info(curl_cookies)
 
+            proxy = None
+            if self.proxy_rotator:
+                proxy = self.proxy_rotator.get_proxy_sync()
+
             response = requests.get(
                 self.api_base_url,
                 params=params,
                 cookies=curl_cookies,
                 headers=headers,
-                proxy="socks5://43.165.172.131:1080",
-                impersonate="chrome119",
+                proxy=proxy,
+                impersonate="chrome_android",
                 timeout=30
             )
 

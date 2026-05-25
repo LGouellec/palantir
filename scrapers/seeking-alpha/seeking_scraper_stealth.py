@@ -8,6 +8,7 @@ Uses Scrapling's StealthyFetcher for enhanced anti-bot avoidance
 # https://github.com/ph00lt0/blocklist
 
 import json
+import re
 import time
 import os
 import sys
@@ -21,11 +22,11 @@ from typing import List, Dict, Optional
 # Add parent directory to path for common module imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from scrapling import Selector
 from scrapling.fetchers import StealthyFetcher
-from playwright.sync_api import Page
+from playwright.sync_api import Locator, Page
 from common.mouvement.human import HumanMouseSimulator
 from seeking_scraper_base import SeekingScraperBase
-
 
 class SeekingScraperStealth(SeekingScraperBase):
     """
@@ -406,7 +407,8 @@ class SeekingScraperStealth(SeekingScraperBase):
                 print("⚠️  Captcha bypass may have failed")
                 # Give it one more second to disappear
                 time.sleep(2.0)
-                page.pause()
+                time.sleep(10)
+                # page.pause()
                 if page.locator('#px-captcha-wrapper').count() == 0:
                     self.logger.info("✅ Captcha bypassed successfully (delayed)!")
                     print("✅ Captcha solved!")
@@ -534,7 +536,8 @@ class SeekingScraperStealth(SeekingScraperBase):
 
     def before_scraping(self):
         # Just make sure we login before before fetching data
-        self.scrape_article("https://seekingalpha.com/", None, True)
+        # self.scrape_article("https://seekingalpha.com/market-news/us-economy", None, True)
+        pass
         
     def get_articles_with_metadata(self, limit: int = 20, filter_scraped: bool = True) -> List[Dict]:
         """
@@ -564,8 +567,13 @@ class SeekingScraperStealth(SeekingScraperBase):
         while len(all_articles) < limit and page_number <= max_pages:
             try:
                 # Fetch page from API
-                articles = self._base_fetch_articles_from_api(page_number, page_size)
+                articles = None
 
+                try:
+                    articles = self._base_fetch_articles_from_api(page_number, page_size)
+                except Exception as e:
+                    articles = self._fetch_articles_from_ui(page_number)
+                    
                 if not articles:
                     self.logger.info(f"No more articles found at page {page_number}, stopping pagination")
                     print(f"📄 Page {page_number}: No articles found, stopping")
@@ -621,39 +629,25 @@ class SeekingScraperStealth(SeekingScraperBase):
 
         return result
 
-    def _fetch_articles_from_api(self, page_number: int, page_size: int) -> List[Dict]:
+    def _fetch_articles_from_ui(self, page_number: int) -> List[Dict]:
         """
         Fetch articles from SeekingAlpha API using StealthyFetcher
 
         Args:
+            category: News category to fetch
             page_number: Page number to fetch (1-indexed)
-            page_size: Number of articles per page
-
+        
         Returns:
             List of article dictionaries with metadata
         """
-        from urllib.parse import urlencode
 
-        # Build API URL with pagination params
-        params = {
-            'filter[category]': self.category,
-            'filter[since]': '0',
-            'filter[until]': str(int(time.time())),
-            'page[size]': str(page_size),
-            'page[number]': str(page_number),
-            'include': 'primaryTickers,secondaryTickers',
-            'isMounting': 'false',
-            'fields[news]': 'title,date,comment_count,content,disclosure,primaryTickers,secondaryTickers,tag,gettyImageUrl,publishOn',
-            'fields[tag]': 'slug,name'
-        }
-
-        url = f"{self.api_base_url}?{urlencode(params)}"
+        url = f"https://seekingalpha.com/{self.category.replace("::", "/").replace("/all", "")}?page={page_number}"
 
         try:
             self.logger.debug(f"Fetching API: {url}")
 
             # Use StealthyFetcher for API requests
-            response = StealthyFetcher.fetch(
+            page = StealthyFetcher.fetch(
                 url,
                 headless=self.headless,
                 network_idle=True,
@@ -662,13 +656,14 @@ class SeekingScraperStealth(SeekingScraperBase):
                 user_data_dir=self.user_data_dir,
                 timeout=10000,
                 useragent='User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
-                disable_resources=True
+                disable_resources=True,
+                page_action=self._bypass_perimeterx_captcha
             )
 
-            self.logger.debug(f"Response status: {response.status}")
+            self.logger.debug(f"Response status: {page.status}")
 
             # Check for 403 Forbidden errors
-            if response.status == 403:
+            if page.status == 403:
                 self.consecutive_403_count += 1
                 self.logger.warning(f"API returned 403 Forbidden (consecutive: {self.consecutive_403_count}/{self.max_consecutive_403})")
 
@@ -676,8 +671,8 @@ class SeekingScraperStealth(SeekingScraperBase):
                     self._cleanup_browser_context()
 
                 return []
-            elif response.status != 200:
-                self.logger.error(f"API returned status {response.status}")
+            elif page.status != 200:
+                self.logger.error(f"API returned status {page.status}")
                 # Reset counter on other errors
                 self.consecutive_403_count = 0
                 return []
@@ -685,29 +680,15 @@ class SeekingScraperStealth(SeekingScraperBase):
             # Success - reset consecutive 403 counter
             self.consecutive_403_count = 0
 
-            # Parse JSON from response body
-            data = json.loads(response.body)
+            links = page.css('a.font-bold[href^="/news/"]')
             articles = []
 
-            # Parse JSON response
-            if 'data' in data:
-                for item in data['data']:
-                    attributes = item.get('attributes', {})
-                    article_id = item.get('id', '')
+            for link in links:
+                metadata = self._extract_article_link(link)
+                if metadata:
+                    articles.append(metadata)
 
-                    # Build article URL
-                    article_url = f"{self.article_base_url}/{article_id}"
-
-                    articles.append({
-                        'id': article_id,
-                        'url': article_url,
-                        'title': attributes.get('title', ''),
-                        'date': attributes.get('publishOn', ''),
-                        'content': attributes.get('content', ''),
-                        'raw_data': item  # Store full data for later use
-                    })
-
-                self.logger.debug(f"Parsed {len(articles)} articles from API response")
+            self.logger.debug(f"Parsed {len(articles)} articles from UI")
 
             return articles
 
@@ -744,6 +725,9 @@ class SeekingScraperStealth(SeekingScraperBase):
             proxy = os.getenv('HTTP_PROXY', None)
             if proxy:
                 self.logger.info(f"Using HTTP Proxy: {proxy}")
+
+            if self.proxy_rotator:
+                proxy = self.proxy_rotator.get_proxy_sync()
 
             while retry:
                 def ensure_content_loaded(page: Page):
@@ -812,7 +796,7 @@ class SeekingScraperStealth(SeekingScraperBase):
                     'solve_cloudflare': False,
                     'proxy': proxy,
                     'page_action': ensure_content_loaded,
-                    #'blocked_domains': ['collector-pxxgcxm9by.cl6.px-cloud.net', 'collector-pxxgcxm9by.px-cloud.net']
+                    'blocked_domains': ['collector-pxxgcxm9by.cl6.px-cloud.net', 'collector-pxxgcxm9by.px-cloud.net']
                 }
 
                 # 
@@ -882,6 +866,32 @@ class SeekingScraperStealth(SeekingScraperBase):
             self.logger.error(f"Error scraping article {url}: {e}", exc_info=self.verbose)
             print(f"  ❌ Error: {e}")
             return None
+        
+    def _extract_article_link (self, locator: Selector) -> Dict:
+        
+        title = locator.text
+        url = locator.attrib.get("href", None)
+
+        if not url:
+            return None
+
+        id = re.search(r"/news/(\d+)-", url)
+        news_id = None
+
+        if id:
+            news_id = id.group(1)
+            article_url = f"https://seekingalpha.com/news/{news_id}"
+            return {
+                'id': news_id,
+                'url': article_url,
+                'title': title,
+                'date': None,
+                'content': None,
+                'raw_data': None
+            }   
+        else:
+            return None
+
 
     def _extract_title(self, page) -> Optional[str]:
         """Extract article title using multiple selectors"""

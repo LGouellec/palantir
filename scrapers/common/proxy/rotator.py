@@ -496,3 +496,118 @@ class ProxyRotator:
             return True
 
         return False
+
+    # ==================== Synchronous API ====================
+    # These methods allow using the rotator from synchronous code
+    # (e.g., with curl_cffi or other sync libraries)
+
+    def _run_async(self, coro):
+        """
+        Helper to run async code from sync context.
+
+        Tries to use existing event loop if available, otherwise creates new one.
+
+        Args:
+            coro: Coroutine to run
+
+        Returns:
+            Result of the coroutine
+        """
+        try:
+            # Try to get existing event loop
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Loop is already running (e.g., in async context)
+                # Create a new loop in a thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, coro)
+                    return future.result()
+            else:
+                # Loop exists but not running
+                return loop.run_until_complete(coro)
+        except RuntimeError:
+            # No event loop exists, create new one
+            return asyncio.run(coro)
+
+    def initialize_sync(self) -> None:
+        """
+        Synchronous version of initialize().
+
+        Initialize the proxy rotator from synchronous code.
+
+        Example:
+            rotator = ProxyRotator(auto_fetch_proxies=True)
+            rotator.initialize_sync()  # Blocks until initialized
+        """
+        return self._run_async(self.initialize())
+
+    def get_proxy_sync(self, strategy: str = "round_robin") -> Optional[str]:
+        """
+        Synchronous version of get_proxy().
+
+        Get next proxy URL from synchronous code.
+
+        Args:
+            strategy: Rotation strategy ("round_robin", "least_used", "random")
+
+        Returns:
+            Proxy URL or None if no proxies available
+
+        Example:
+            rotator = ProxyRotator(auto_fetch_proxies=True)
+            proxy = rotator.get_proxy_sync()  # Blocks until proxy available
+
+            # Use with curl_cffi
+            import curl_cffi.requests as requests
+            response = requests.get(url, proxy=proxy)
+        """
+        return self._run_async(self.get_proxy(strategy))
+
+    def mark_success_sync(self, proxy_url: str) -> None:
+        """
+        Synchronous version of mark_success().
+
+        Mark a proxy request as successful from synchronous code.
+
+        Args:
+            proxy_url: Proxy URL that succeeded
+
+        Example:
+            rotator.mark_success_sync(proxy)
+        """
+        return self._run_async(self.mark_success(proxy_url))
+
+    def mark_failure_sync(self, proxy_url: str, error: Exception) -> None:
+        """
+        Synchronous version of mark_failure().
+
+        Mark a proxy request as failed from synchronous code.
+
+        Args:
+            proxy_url: Proxy URL that failed
+            error: Exception that occurred
+
+        Example:
+            try:
+                response = requests.get(url, proxy=proxy)
+            except Exception as e:
+                rotator.mark_failure_sync(proxy, e)
+        """
+        return self._run_async(self.mark_failure(proxy_url, error))
+
+    def refresh_proxies_sync(self) -> bool:
+        """
+        Synchronous version of refresh_proxies().
+
+        Manually trigger a proxy list refresh from synchronous code.
+
+        Returns:
+            True if refresh was successful, False otherwise
+
+        Example:
+            success = rotator.refresh_proxies_sync()
+            if success:
+                print("Proxies refreshed!")
+        """
+        return self._run_async(self.refresh_proxies())

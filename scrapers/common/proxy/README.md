@@ -15,7 +15,7 @@ A robust proxy rotation system with automatic fetching, validation, and health c
 
 ## Quick Start
 
-### Basic Usage (Manual Proxy List)
+### Async Usage (Default)
 
 ```python
 from common import ProxyRotator
@@ -28,13 +28,41 @@ rotator = ProxyRotator(
     ]
 )
 
-# Get next proxy
+# Async API (use in async functions)
 proxy_url = await rotator.get_proxy()
 
 # Mark success/failure for health tracking
 await rotator.mark_success(proxy_url)
 await rotator.mark_failure(proxy_url, exception)
 ```
+
+### Sync Usage (For curl_cffi, requests, etc.)
+
+```python
+from common import ProxyRotator
+
+# Initialize with manual proxy list
+rotator = ProxyRotator(
+    proxies=[
+        "socks5://proxy1.example.com:1080",
+        "socks5://proxy2.example.com:1080"
+    ]
+)
+
+# Sync API (use in regular functions)
+rotator.initialize_sync()  # Initialize first
+proxy_url = rotator.get_proxy_sync()
+
+# Mark success/failure for health tracking
+rotator.mark_success_sync(proxy_url)
+rotator.mark_failure_sync(proxy_url, exception)
+```
+
+**Use the `_sync` methods when:**
+- Using with `curl_cffi` (synchronous HTTP library)
+- Using with `requests` library
+- Working in synchronous/non-async code
+- Integrating with existing sync frameworks
 
 ### Auto-Fetch Mode
 
@@ -162,6 +190,79 @@ http://user:pass@host:port
 - Per-proxy request rate limiting (requests/minute)
 - Prevents overwhelming individual proxies
 - Automatically skips rate-limited proxies
+
+## Synchronous API
+
+The proxy rotator provides a synchronous API for use with non-async libraries like `curl_cffi`, `requests`, etc.
+
+### Available Sync Methods
+
+| Async Method | Sync Method | Description |
+|--------------|-------------|-------------|
+| `await initialize()` | `initialize_sync()` | Initialize the rotator |
+| `await get_proxy()` | `get_proxy_sync()` | Get next proxy URL |
+| `await mark_success()` | `mark_success_sync()` | Mark proxy as successful |
+| `await mark_failure()` | `mark_failure_sync()` | Mark proxy as failed |
+| `await refresh_proxies()` | `refresh_proxies_sync()` | Manually refresh proxy list |
+
+### Example with curl_cffi
+
+```python
+from common.proxy import ProxyRotator
+from curl_cffi import requests
+
+# Initialize rotator
+rotator = ProxyRotator(auto_fetch_proxies=True)
+rotator.initialize_sync()  # Blocks until initialized
+
+# Get proxy and make request
+proxy = rotator.get_proxy_sync()
+
+try:
+    response = requests.get(
+        "https://api.example.com/data",
+        proxy=proxy,
+        impersonate="chrome119"
+    )
+    
+    if response.status_code == 200:
+        rotator.mark_success_sync(proxy)
+        print(response.json())
+    else:
+        rotator.mark_failure_sync(proxy, Exception(f"HTTP {response.status_code}"))
+        
+except Exception as e:
+    rotator.mark_failure_sync(proxy, e)
+    raise
+```
+
+### Example with requests library
+
+```python
+from common.proxy import ProxyRotator
+import requests
+
+rotator = ProxyRotator(
+    proxies=["socks5://proxy1:1080", "socks5://proxy2:1080"]
+)
+rotator.initialize_sync()
+
+for i in range(10):
+    proxy = rotator.get_proxy_sync(strategy="round_robin")
+    
+    try:
+        response = requests.get("https://httpbin.org/ip", proxies={"https": proxy})
+        rotator.mark_success_sync(proxy)
+        print(f"Request {i}: {response.json()['origin']}")
+    except Exception as e:
+        rotator.mark_failure_sync(proxy, e)
+```
+
+### How Sync API Works
+
+The sync methods internally use `asyncio.run()` or the existing event loop to run async code from synchronous context. This allows seamless integration with sync libraries without requiring async/await syntax.
+
+**Performance Note**: Each sync call creates a small overhead due to event loop management. For high-performance applications with thousands of requests, consider using the async API directly.
 
 ## Example: YFinance Scraper
 

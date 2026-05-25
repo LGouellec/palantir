@@ -160,9 +160,7 @@ class ProxyValidator:
 
             except Exception as e:
                 # Log specific errors at debug level
-                logger.debug(
-                    f"Proxy validation failed for {self._sanitize_url(proxy_url)}: {e}"
-                )
+                # logger.debug(f"Proxy validation failed for {self._sanitize_url(proxy_url)}: {e}")
                 return False
 
     def _sanitize_url(self, url: str) -> str:
