@@ -57,7 +57,13 @@ class YFinanceFetcher(BaseFetcher):
                     missing_fields=[],
                 )
 
-            # Start with ALL info fields
+            # Start with ALL info fields from Yahoo Finance JSON
+            # This preserves the complete Yahoo Finance API response including:
+            # - companyOfficers (list of executives with compensation)
+            # - address, city, state, zip, country, phone, website
+            # - industry, sector, longBusinessSummary
+            # - all price, volume, and ratio fields
+            # - governance and risk metrics
             data = dict(info)
 
             # Ensure ticker is included
@@ -69,10 +75,26 @@ class YFinanceFetcher(BaseFetcher):
             )
 
             # Override/add standardized field names for key fields
+            # These provide consistent field names while preserving original Yahoo fields
             data.update({
                 "name": info.get("longName", info.get("shortName", "")),
                 "current_price": info.get("currentPrice", info.get("regularMarketPrice", 0)),
                 "shares_outstanding": float(shares) if shares else 0.0,
+                # Add market cap from Yahoo Finance
+                "market_cap": info.get("marketCap", 0),
+                # Add ratios from Yahoo Finance
+                "pe_ratio": info.get("trailingPE", 0),
+                "forward_pe": info.get("forwardPE", 0),
+                "pb_ratio": info.get("priceToBook", 0),
+                "ps_ratio": info.get("priceToSalesTrailing12Months", 0),
+                "peg_ratio": info.get("pegRatio", 0),
+                "dividend_yield": info.get("dividendYield", 0),
+                # Add exchange and currency
+                "currency": info.get("currency", "USD"),
+                "exchange": info.get("exchange", ""),
+                # Add sector and industry
+                "sector": info.get("sector", ""),
+                "industry": info.get("industry", ""),
             })
 
             # Track which standard fields are missing or zero
@@ -119,7 +141,12 @@ class YFinanceFetcher(BaseFetcher):
             balance_sheet = stock.balance_sheet
             cashflow = stock.cashflow
 
-            # Start with all info fields
+            # Start with ALL info fields from Yahoo Finance JSON
+            # This preserves complete company data including:
+            # - companyOfficers: List of executives with names, titles, ages, compensation
+            # - Business description: longBusinessSummary, address, contact info
+            # - Governance metrics: auditRisk, boardRisk, compensationRisk, etc.
+            # - All financial ratios and metrics from Yahoo Finance
             data: Dict[str, Any] = dict(info)
 
             # Add raw financial statements as dictionaries

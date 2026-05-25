@@ -20,6 +20,7 @@ class StockQuote:
     open_price: Optional[float] = None
     day_high: Optional[float] = None
     day_low: Optional[float] = None
+    avg_50d: Optional[float] = None
     volume: Optional[int] = None
     avg_volume_10d: Optional[int] = None
     market_cap: Optional[float] = None
@@ -30,6 +31,7 @@ class StockQuote:
     week_52_high: Optional[float] = None
     week_52_low: Optional[float] = None
     shares_outstanding: Optional[int] = None
+    recommendation_Key: Optional[str] = None
 
 
 @dataclass
