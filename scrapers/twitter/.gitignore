@@ -1,0 +1,16 @@
+node_modules/
+dist/
+
+# Secrets / runtime config
+.env
+.env.local
+kafka_config.properties
+cookies.json
+
+# State
+history/
+*.log
+logs/
+
+# OS
+.DS_Store

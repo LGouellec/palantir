@@ -27,4 +27,4 @@ You can find and use this Kafka‑enabled version here:
 
 Docker image with the Kafka plugin
 
-`ghcr.io/lgouellec/reddit-universal-scraper:0.0.2` 
+`ghcr.io/lgouellec/reddit-universal-scraper:0.0.6` 

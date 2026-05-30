@@ -249,6 +249,48 @@ services:
     networks:
       - scraper-network
 
+  twitter-scraper:
+    build:
+      context: .
+      dockerfile: twitter/Dockerfile
+    container_name: twitter-scraper
+    depends_on:
+      kafka:
+        condition: service_started
+    restart: unless-stopped
+    environment:
+      # What to scrape (set at least one of QUERIES / USERS).
+      # NOTE: `$$` escapes `$` so compose doesn't treat cashtags as variable
+      # substitutions — these reach the container as $TSLA,$NVDA,$AAPL.
+      - TWITTER_QUERIES=$$TSLA,$$NVDA,$$AAPL
+      - TWITTER_USERS=DeItaone,FirstSquawk
+      - SEARCH_MODE=Latest
+      - MAX_TWEETS=50
+      - DELAY_MS=1500
+      - CONTINUOUS=true
+      - CONTINUOUS_INTERVAL=300
+      - VERBOSE=true
+      # Kafka configuration
+      - KAFKA_ENABLED=true
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=twitter-tweets
+      # Authentication (cookies strongly preferred over login).
+      # Persist the cookies file under the mounted history volume.
+      - TWITTER_COOKIES_FILE=/app/history/cookies.json
+      # - TWITTER_USERNAME=
+      # - TWITTER_PASSWORD=
+      # - TWITTER_EMAIL=
+      # History configuration
+      - HISTORY_FILE=/app/history/scraped_history.json
+      - HISTORY_TTL_DAYS=30
+      # Timezone
+      - TZ=UTC
+    volumes:
+      # Persist scraping history + cookies session
+      - ./twitter/history:/app/history
+    networks:
+      - scraper-network
+
   kafka:
     image: confluentinc/cp-server:8.2.0
     hostname: kafka
