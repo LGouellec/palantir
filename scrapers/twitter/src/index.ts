@@ -2,13 +2,25 @@ import fs from "node:fs";
 import path from "node:path";
 import "dotenv/config";
 import type { Tweet } from "@the-convocation/twitter-scraper";
-import { loadConfig, type AppConfig } from "./config.js";
+import {
+  loadConfig,
+  resolveSinceCutoff,
+  toSearchDate,
+  type AppConfig,
+} from "./config.js";
 import { History } from "./history.js";
 import { KafkaSink } from "./kafka.js";
 import { log } from "./logger.js";
 import { TwitterClient, toRecord, type TweetRecord } from "./scraper.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Epoch ms of a tweet, from the parsed time or the raw timestamp. */
+function tweetTimeMs(tweet: Tweet): number | null {
+  if (tweet.timeParsed) return new Date(tweet.timeParsed).getTime();
+  if (tweet.timestamp) return tweet.timestamp * 1000;
+  return null;
+}
 
 /** Consume one tweet source (search query or user timeline), emitting records. */
 async function drain(
@@ -18,11 +30,22 @@ async function drain(
   history: History,
   sink: KafkaSink | null,
   localBuf: TweetRecord[],
+  cutoffMs: number | null,
 ): Promise<number> {
   let emitted = 0;
   try {
     for await (const tweet of gen) {
       if (!tweet.id) continue;
+      // Date lower bound (e.g. SINCE=today). Timelines have no `since:`
+      // operator, so they're filtered here; skip rather than break since
+      // pinned/out-of-order tweets can appear among newer ones.
+      if (cutoffMs !== null) {
+        const ts = tweetTimeMs(tweet);
+        if (ts !== null && ts < cutoffMs) {
+          log.debug(`skip pre-cutoff ${tweet.id}`);
+          continue;
+        }
+      }
       if (history.has(tweet.id)) {
         log.debug(`skip duplicate ${tweet.id}`);
         continue;
@@ -82,15 +105,23 @@ async function runCycle(
   const localBuf: TweetRecord[] = [];
   let total = 0;
 
+  // Date lower bound (recomputed each cycle so SINCE=today rolls forward).
+  const cutoff = resolveSinceCutoff(cfg.since);
+  const cutoffMs = cutoff ? cutoff.getTime() : null;
+  const sinceOp = cutoff ? ` since:${toSearchDate(cutoff)}` : "";
+
   for (const query of cfg.queries) {
-    log.info(`Searching: "${query}" (mode=${cfg.searchMode}, max=${cfg.maxTweets})`);
+    // Append the server-side `since:` operator unless the query already has one.
+    const q = sinceOp && !/\bsince:/i.test(query) ? `${query}${sinceOp}` : query;
+    log.info(`Searching: "${q}" (mode=${cfg.searchMode}, max=${cfg.maxTweets})`);
     total += await drain(
-      client.searchTweets(query),
+      client.searchTweets(q),
       `search:${query}`,
       cfg,
       history,
       sink,
       localBuf,
+      cutoffMs,
     );
     await sleep(cfg.delayMs);
   }
@@ -104,6 +135,7 @@ async function runCycle(
       history,
       sink,
       localBuf,
+      cutoffMs,
     );
     await sleep(cfg.delayMs);
   }
@@ -117,7 +149,8 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   log.info(
     `Config: queries=${cfg.queries.length} users=${cfg.users.length} ` +
-      `kafka=${cfg.kafkaEnabled} continuous=${cfg.continuous}`,
+      `kafka=${cfg.kafkaEnabled} continuous=${cfg.continuous} ` +
+      `since=${cfg.since ?? "<none>"}`,
   );
 
   const history = new History(cfg.historyFile, cfg.historyTtlDays);

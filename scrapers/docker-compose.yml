@@ -267,6 +267,8 @@ services:
       - SEARCH_MODE=Latest
       - MAX_TWEETS=50
       - DELAY_MS=1500
+      # Only fetch tweets from today onward (rolls forward each cycle).
+      - SINCE=today
       - CONTINUOUS=true
       - CONTINUOUS_INTERVAL=300
       - VERBOSE=true

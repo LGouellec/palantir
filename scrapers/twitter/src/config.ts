@@ -17,6 +17,9 @@ export interface AppConfig {
   searchMode: SearchMode;
   maxTweets: number;
   delayMs: number;
+  // Only emit tweets at/after this point: "today", a "YYYY-MM-DD" date, or
+  // undefined for no lower bound.
+  since?: string;
 
   // Run mode
   continuous: boolean;
@@ -89,6 +92,32 @@ function parseSearchMode(raw: string | undefined): SearchMode {
   }
 }
 
+/**
+ * Resolve the configured `SINCE` into a UTC cutoff Date, or null when no
+ * lower bound is set. `"today"` is the start of the current UTC day (recomputed
+ * on each call, so a long-running continuous scraper rolls forward day to day).
+ */
+export function resolveSinceCutoff(since: string | undefined): Date | null {
+  if (!since) return null;
+  if (since.toLowerCase() === "today") {
+    const now = new Date();
+    return new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+  }
+  const d = new Date(`${since}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) {
+    log.warn(`Invalid SINCE "${since}" — ignoring date filter`);
+    return null;
+  }
+  return d;
+}
+
+/** Format a Date as `YYYY-MM-DD` (UTC) for Twitter's `since:` search operator. */
+export function toSearchDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
 export function loadConfig(): AppConfig {
   const cfg: AppConfig = {
     queries: envList("TWITTER_QUERIES"),
@@ -96,6 +125,7 @@ export function loadConfig(): AppConfig {
     searchMode: parseSearchMode(envStr("SEARCH_MODE")),
     maxTweets: envInt("MAX_TWEETS", 50),
     delayMs: envInt("DELAY_MS", 1500),
+    since: envStr("SINCE"),
 
     continuous: envBool("CONTINUOUS", false),
     continuousIntervalSec: envInt("CONTINUOUS_INTERVAL", 300),

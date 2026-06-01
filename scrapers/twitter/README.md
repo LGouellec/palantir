@@ -53,6 +53,7 @@ All config is via environment variables (or a `.env` file). See
 | `SEARCH_MODE` | `Top` / `Latest` / `Photos` / `Videos` / `Users` | `Latest` |
 | `MAX_TWEETS` | Max tweets per query / user | `50` |
 | `DELAY_MS` | Delay between requests (ms) | `1500` |
+| `SINCE` | Only fetch tweets at/after this point: `today` (start of the current UTC day, rolls forward in continuous mode) or a fixed `YYYY-MM-DD`. Empty = no bound. Uses the search `since:` operator + a client-side filter on timelines. | — |
 | `CONTINUOUS` / `CONTINUOUS_INTERVAL` | Loop forever every N seconds | `false` / `300` |
 | `KAFKA_ENABLED` / `KAFKA_TOPIC` | Publish to Kafka | `false` / `twitter-tweets` |
 | `KAFKA_BOOTSTRAP_SERVERS` | Broker(s); overrides config file | — |

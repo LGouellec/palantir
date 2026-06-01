@@ -31,6 +31,7 @@ RUN mkdir -p /app/history /app/output
 ENV SEARCH_MODE=Latest \
     MAX_TWEETS=50 \
     DELAY_MS=1500 \
+    SINCE=today \
     CONTINUOUS=false \
     CONTINUOUS_INTERVAL=300 \
     KAFKA_ENABLED=false \

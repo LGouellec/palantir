@@ -142,6 +142,13 @@ export class TwitterClient {
   async authenticate(): Promise<void> {
     // 1. Cookies from a JSON file (browser-extension export, tough-cookie
     //    JSON, an array of strings, or a raw "a=b; c=d" string).
+    if (this.cfg.cookiesFile && !fs.existsSync(this.cfg.cookiesFile)) {
+      log.warn(
+        `TWITTER_COOKIES_FILE is set but no file exists at ` +
+          `${path.resolve(this.cfg.cookiesFile)} — check the path/working ` +
+          `directory. Falling back to other auth methods.`,
+      );
+    }
     if (this.cfg.cookiesFile && fs.existsSync(this.cfg.cookiesFile)) {
       const raw = fs.readFileSync(path.resolve(this.cfg.cookiesFile), "utf8");
       const cookies = this.toTwitterCookies(this.parseCookieFile(raw));
