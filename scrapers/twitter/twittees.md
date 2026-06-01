@@ -3,6 +3,7 @@
 @Fxflow
 @realDonaldTrump
 @preferforex
+@theaiportfolios
 @FusionptCapital
 @KimbleCharting
 @the_chart_life
