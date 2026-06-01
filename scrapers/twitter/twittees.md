@@ -1,6 +1,7 @@
 # X Accounts
 
 @Fxflow
+@realDonaldTrump
 @preferforex
 @FusionptCapital
 @KimbleCharting
