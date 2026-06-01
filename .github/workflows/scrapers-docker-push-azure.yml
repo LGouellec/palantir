@@ -12,11 +12,13 @@ env:
   IMAGE_YFINANCE_NAME: palantir/yfinance-scraper
   IMAGE_SEEKING_NAME: palantir/seeking-scraper
   IMAGE_INVESTING_NAME: palantir/investing-scraper
+  IMAGE_TWITTER_NAME: palantir/twitter-scraper
   CONTEXT_PATH: ./scrapers
   DOCKERFILE_WSJ_PATH: ./scrapers/wsj/Dockerfile
   DOCKERFILE_YF_PATH: ./scrapers/yfinance/Dockerfile
   DOCKERFILE_SEEKING_PATH: ./scrapers/seeking-alpha/Dockerfile
   DOCKERFILE_INVESTING_PATH: ./scrapers/investing/Dockerfile
+  DOCKERFILE_TWITTER_PATH: ./scrapers/twitter/Dockerfile
 
 jobs:
   build-and-push-acr:
@@ -41,11 +43,13 @@ jobs:
           IMAGE_YF="${ACR_REGISTRY}/${{ env.IMAGE_YFINANCE_NAME }}"
           IMAGE_SEEKING="${ACR_REGISTRY}/${{ env.IMAGE_SEEKING_NAME }}"
           IMAGE_INVESTING="${ACR_REGISTRY}/${{ env.IMAGE_INVESTING_NAME }}"
+          IMAGE_TWITTER="${ACR_REGISTRY}/${{ env.IMAGE_TWITTER_NAME }}"
 
           TAGS_WSJ="${IMAGE_WSJ}:latest"
           TAGS_YF="${IMAGE_YF}:latest"
           TAGS_SEEKING="${IMAGE_SEEKING}:latest"
           TAGS_INVESTING="${IMAGE_INVESTING}:latest"
+          TAGS_TWITTER="${IMAGE_TWITTER}:latest"
 
           # Add branch name tag
           if [[ "${{ github.ref }}" == refs/heads/* ]]; then
@@ -54,6 +58,7 @@ jobs:
             TAGS_YF="${TAGS_YF},${IMAGE_YF}:${BRANCH_NAME}"
             TAGS_SEEKING="${TAGS_SEEKING},${IMAGE_SEEKING}:${BRANCH_NAME}"
             TAGS_INVESTING="${TAGS_INVESTING},${IMAGE_INVESTING}:${BRANCH_NAME}"
+            TAGS_TWITTER="${TAGS_TWITTER},${IMAGE_TWITTER}:${BRANCH_NAME}"
           fi
 
           # Add semver tags for releases
@@ -63,12 +68,14 @@ jobs:
             TAGS_YF="${TAGS_YF},${IMAGE_YF}:${VERSION}"
             TAGS_SEEKING="${TAGS_SEEKING},${IMAGE_SEEKING}:${VERSION}"
             TAGS_INVESTING="${TAGS_INVESTING},${IMAGE_INVESTING}:${VERSION}"
+            TAGS_TWITTER="${TAGS_TWITTER},${IMAGE_TWITTER}:${VERSION}"
             MAJOR=$(echo $VERSION | cut -d. -f1)
             MINOR=$(echo $VERSION | cut -d. -f1-2)
             TAGS_WSJ="${TAGS_WSJ},${IMAGE_WSJ}:${MAJOR},${IMAGE_WSJ}:${MINOR}"
             TAGS_YF="${TAGS_YF},${IMAGE_YF}:${MAJOR},${IMAGE_YF}:${MINOR}"
             TAGS_SEEKING="${TAGS_SEEKING},${IMAGE_SEEKING}:${MAJOR},${IMAGE_SEEKING}:${MINOR}"
             TAGS_INVESTING="${TAGS_INVESTING},${IMAGE_INVESTING}:${MAJOR},${IMAGE_INVESTING}:${MINOR}"
+            TAGS_TWITTER="${TAGS_TWITTER},${IMAGE_TWITTER}:${MAJOR},${IMAGE_TWITTER}:${MINOR}"
           fi
 
           # Add SHA tag
@@ -77,15 +84,18 @@ jobs:
           TAGS_YF="${TAGS_YF},${IMAGE_YF}:sha-${SHORT_SHA}"
           TAGS_SEEKING="${TAGS_SEEKING},${IMAGE_SEEKING}:sha-${SHORT_SHA}"
           TAGS_INVESTING="${TAGS_INVESTING},${IMAGE_INVESTING}:sha-${SHORT_SHA}"
+          TAGS_TWITTER="${TAGS_TWITTER},${IMAGE_TWITTER}:sha-${SHORT_SHA}"
 
           echo "tags_wsj=${TAGS_WSJ}" >> $GITHUB_OUTPUT
           echo "tags_yfinance=${TAGS_YF}" >> $GITHUB_OUTPUT
           echo "tags_seeking=${TAGS_SEEKING}" >> $GITHUB_OUTPUT
           echo "tags_investing=${TAGS_INVESTING}" >> $GITHUB_OUTPUT
+          echo "tags_twitter=${TAGS_TWITTER}" >> $GITHUB_OUTPUT
           echo "Generated tags wsj: ${TAGS_WSJ}"
           echo "Generated tags yfinance: ${TAGS_YF}"
           echo "Generated tags seeking: ${TAGS_SEEKING}"
           echo "Generated tags investing: ${TAGS_INVESTING}"
+          echo "Generated tags twitter: ${TAGS_TWITTER}"
       # Login Docker registry
       - name: Login to container registry
         uses: docker/login-action@v3
@@ -157,6 +167,22 @@ jobs:
             BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
             VERSION=${{ github.ref_name }}
             REVISION=${{ github.sha }}
+      # Build and push Docker image Twitter
+      - name: Build and push Twitter Docker image to ACR
+        id: build-and-push-twitter
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.CONTEXT_PATH }}
+          file: ${{ env.DOCKERFILE_TWITTER_PATH }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.generate-tags.outputs.tags_twitter }}
+          cache-from: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_TWITTER_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_TWITTER_NAME }}:buildcache,mode=max
+          build-args: |
+            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            VERSION=${{ github.ref_name }}
+            REVISION=${{ github.sha }}
       # Summary
       - name: Create job summary
         if: always()
@@ -170,6 +196,7 @@ jobs:
           echo "2. **YFinance Scraper:** \`${{ env.IMAGE_YFINANCE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
           echo "3. **Seeking Alpha Scraper:** \`${{ env.IMAGE_SEEKING_NAME }}\`" >> $GITHUB_STEP_SUMMARY
           echo "4. **Investing Scraper:** \`${{ env.IMAGE_INVESTING_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "5. **Twitter Scraper:** \`${{ env.IMAGE_TWITTER_NAME }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Tags" >> $GITHUB_STEP_SUMMARY
           echo "**WSJ Scraper:**" >> $GITHUB_STEP_SUMMARY
@@ -192,8 +219,14 @@ jobs:
           echo "${{ steps.generate-tags.outputs.tags_investing }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Twitter Scraper:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.generate-tags.outputs.tags_twitter }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Digests" >> $GITHUB_STEP_SUMMARY
           echo "- **WSJ:** \`${{ steps.build-and-push-wsj.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **YFinance:** \`${{ steps.build-and-push-yf.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Seeking Alpha:** \`${{ steps.build-and-push-seeking.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Investing:** \`${{ steps.build-and-push-investing.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Twitter:** \`${{ steps.build-and-push-twitter.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY

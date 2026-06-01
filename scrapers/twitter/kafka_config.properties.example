@@ -1,0 +1,9 @@
+# Confluent Cloud connection (copy to kafka_config.properties and fill in).
+# Same format as the other scrapers in this repo. Referenced via KAFKA_CONFIG_FILE.
+bootstrap.servers=pkc-xxxxx.us-east-2.aws.confluent.cloud:9092
+security.protocol=SASL_SSL
+sasl.mechanisms=PLAIN
+sasl.username=YOUR_API_KEY
+sasl.password=YOUR_API_SECRET
+session.timeout.ms=45000
+client.id=twitter-scraper
