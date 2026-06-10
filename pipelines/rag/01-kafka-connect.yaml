@@ -1,0 +1,225 @@
+---
+# Confluent Cloud credentials for the Connect worker (Kafka API key/secret) and
+# Schema Registry (the `news_embedding` topic is produced by Flink with
+# json-registry / JSON_SR, so the worker needs Schema Registry access to
+# (de)serialize it).
+#
+# Kafka key/secret: the dedicated "CosmosDb Sink Connector" key from
+# infra/cosmos-db-rag.md. Fill in the Schema Registry values for your env.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: confluent-cloud-credentials
+  namespace: palantir-rag
+type: Opaque
+stringData:
+  bootstrap-servers: "XXXXX.us-east-2.aws.confluent.cloud:9092"
+  kafka-api-key: "XXXXX"
+  kafka-api-secret: "XXXXX"
+  schema-registry-url: "https://XXXXX.us-west-2.aws.confluent.cloud"
+  schema-registry-api-key: "XXXXX"
+  schema-registry-api-secret: "XXXXX"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-connect
+  namespace: palantir-rag
+  labels:
+    app: kafka-connect
+spec:
+  # Headless: gives each StatefulSet pod a stable DNS name
+  # (kafka-connect-N.kafka-connect.palantir-rag.svc.cluster.local) so workers
+  # can forward REST requests to the actual leader instead of a random pod.
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: kafka-connect
+  ports:
+    - name: rest
+      port: 8083
+      targetPort: 8083
+---
+# Self-managed Kafka Connect worker (distributed mode) on cp-kafka-connect
+# (Confluent Community License — free, no paid Platform license). It connects to
+# our Confluent Cloud cluster as its broker and runs the Microsoft CosmosDB sink
+# connector (v1.19.0 fat-jar from github.com/microsoft/kafka-connect-cosmosdb).
+# The JSON_SR converter is already bundled in this image.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka-connect
+  namespace: palantir-rag
+  labels:
+    app: kafka-connect
+spec:
+  serviceName: kafka-connect
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kafka-connect
+  template:
+    metadata:
+      labels:
+        app: kafka-connect
+    spec:
+      # Download the connector plugins into a shared volume that the Connect
+      # container exposes on its plugin.path.
+      initContainers:
+        - name: install-cosmos-connector
+          image: curlimages/curl:8.10.1
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              URL=https://github.com/microsoft/kafka-connect-cosmosdb/releases/download/v1.19.0/kafka-connect-cosmos-1.18.0-jar-with-dependencies.jar
+              DEST=/connectors/kafka-connect-cosmos
+              mkdir -p "$DEST"
+              echo "Downloading CosmosDB connector v1.19.0 from GitHub release..."
+              curl -fsSL "$URL" -o "$DEST/kafka-connect-cosmos.jar"
+              ls -l "$DEST"
+          volumeMounts:
+            - name: connectors
+              mountPath: /connectors
+        # ClickHouse sink connector v1.3.9 (confluent-hub style zip → unzip into
+        # plugin.path). Uses alpine for curl + unzip (curl image has no unzip).
+        - name: install-clickhouse-connector
+          image: alpine:3.20
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              apk add --no-cache curl unzip
+              URL=https://github.com/ClickHouse/clickhouse-kafka-connect/releases/download/v1.3.9/clickhouse-kafka-connect-v1.3.9.zip
+              echo "Downloading ClickHouse Kafka Connect v1.3.9 from GitHub release..."
+              curl -fsSL "$URL" -o /tmp/clickhouse.zip
+              # The zip contains a top-level <owner>-<name>-<version>/ plugin dir
+              # (with lib/*.jar) — unzip directly under plugin.path.
+              unzip -o -q /tmp/clickhouse.zip -d /connectors
+              ls -l /connectors
+          volumeMounts:
+            - name: connectors
+              mountPath: /connectors
+      containers:
+        - name: kafka-connect
+          image: confluentinc/cp-kafka-connect:8.2.1
+          # Build the SASL/JAAS strings from the secret env vars at runtime so
+          # the credentials never sit in plain env values, then start Connect.
+          command:
+            - bash
+            - -c
+            - |
+              export CONNECT_SASL_JAAS_CONFIG="org.apache.kafka.common.security.plain.PlainLoginModule required username=\"${KAFKA_API_KEY}\" password=\"${KAFKA_API_SECRET}\";"
+              export CONNECT_PRODUCER_SASL_JAAS_CONFIG="$CONNECT_SASL_JAAS_CONFIG"
+              export CONNECT_CONSUMER_SASL_JAAS_CONFIG="$CONNECT_SASL_JAAS_CONFIG"
+              export CONNECT_ADMIN_SASL_JAAS_CONFIG="$CONNECT_SASL_JAAS_CONFIG"
+              export CONNECT_VALUE_CONVERTER_BASIC_AUTH_USER_INFO="${SR_API_KEY}:${SR_API_SECRET}"
+              export CONNECT_KEY_CONVERTER_BASIC_AUTH_USER_INFO="${SR_API_KEY}:${SR_API_SECRET}"
+              exec /etc/confluent/docker/run
+          ports:
+            - containerPort: 8083
+              name: rest
+          env:
+            # Pod's own name → used to advertise a unique REST address per worker.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # Credentials pulled from the secret; consumed by the command above.
+            - name: KAFKA_API_KEY
+              valueFrom:
+                secretKeyRef: { name: confluent-cloud-credentials, key: kafka-api-key }
+            - name: KAFKA_API_SECRET
+              valueFrom:
+                secretKeyRef: { name: confluent-cloud-credentials, key: kafka-api-secret }
+            - name: SR_API_KEY
+              valueFrom:
+                secretKeyRef: { name: confluent-cloud-credentials, key: schema-registry-api-key }
+            - name: SR_API_SECRET
+              valueFrom:
+                secretKeyRef: { name: confluent-cloud-credentials, key: schema-registry-api-secret }
+
+            - name: CONNECT_BOOTSTRAP_SERVERS
+              valueFrom:
+                secretKeyRef: { name: confluent-cloud-credentials, key: bootstrap-servers }
+
+            # --- Confluent Cloud connection (SASL_SSL / PLAIN) ---
+            - name: CONNECT_SECURITY_PROTOCOL
+              value: "SASL_SSL"
+            - name: CONNECT_SASL_MECHANISM
+              value: "PLAIN"
+            - name: CONNECT_PRODUCER_SECURITY_PROTOCOL
+              value: "SASL_SSL"
+            - name: CONNECT_PRODUCER_SASL_MECHANISM
+              value: "PLAIN"
+            - name: CONNECT_CONSUMER_SECURITY_PROTOCOL
+              value: "SASL_SSL"
+            - name: CONNECT_CONSUMER_SASL_MECHANISM
+              value: "PLAIN"
+            - name: CONNECT_ADMIN_SECURITY_PROTOCOL
+              value: "SASL_SSL"
+            - name: CONNECT_ADMIN_SASL_MECHANISM
+              value: "PLAIN"
+
+            - name: CONNECT_GROUP_ID
+              value: "palantir-connect"
+            - name: CONNECT_CONFIG_STORAGE_TOPIC
+              value: "palantir-connect-configs"
+            - name: CONNECT_OFFSET_STORAGE_TOPIC
+              value: "palantir-connect-offsets"
+            - name: CONNECT_STATUS_STORAGE_TOPIC
+              value: "palantir-connect-status"
+            # Confluent Cloud requires replication factor 3 for Connect topics.
+            - name: CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR
+              value: "3"
+            - name: CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR
+              value: "3"
+            - name: CONNECT_STATUS_STORAGE_REPLICATION_FACTOR
+              value: "3"
+
+            # --- Converters: JSON_SR (Schema Registry) to match Flink ---
+            - name: CONNECT_KEY_CONVERTER
+              value: "io.confluent.connect.json.JsonSchemaConverter"
+            - name: CONNECT_VALUE_CONVERTER
+              value: "io.confluent.connect.json.JsonSchemaConverter"
+            - name: CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL
+              valueFrom:
+                secretKeyRef: { name: confluent-cloud-credentials, key: schema-registry-url }
+            - name: CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL
+              valueFrom:
+                secretKeyRef: { name: confluent-cloud-credentials, key: schema-registry-url }
+            - name: CONNECT_KEY_CONVERTER_BASIC_AUTH_CREDENTIALS_SOURCE
+              value: "USER_INFO"
+            - name: CONNECT_VALUE_CONVERTER_BASIC_AUTH_CREDENTIALS_SOURCE
+              value: "USER_INFO"
+
+            # Unique per-pod address so inter-worker REST forwarding reaches the
+            # real leader (not the round-robined Service VIP).
+            - name: CONNECT_REST_ADVERTISED_HOST_NAME
+              value: "$(POD_NAME).kafka-connect.palantir-rag.svc.cluster.local"
+            - name: CONNECT_REST_PORT
+              value: "8083"
+            - name: CONNECT_PLUGIN_PATH
+              value: "/usr/share/java,/usr/share/confluent-hub-components,/connectors"
+          resources:
+            requests:
+              cpu: "2"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 4Gi
+          readinessProbe:
+            httpGet:
+              path: /connectors
+              port: 8083
+            initialDelaySeconds: 45
+            periodSeconds: 15
+            failureThreshold: 10
+          volumeMounts:
+            - name: connectors
+              mountPath: /connectors
+      volumes:
+        - name: connectors
+          emptyDir: {}
