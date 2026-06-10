@@ -20,6 +20,7 @@ database (the RAG vector store).
 | `00-namespace.yaml` | `palantir-rag` namespace |
 | `01-kafka-connect.yaml` | Confluent Cloud credentials Secret + Kafka Connect StatefulSet (init container fetches the connector jar) + headless REST Service |
 | `02-cosmosdb-sink-connector.yaml` | CosmosDB key Secret, connector ConfigMap, and a Job that registers the sink via the Connect REST API |
+| `03-cosmosdb-sink-companies.yaml` | CosmosDB key Secret, connector ConfigMap, and a Job that registers the sink via the Connect REST API |
 
 ## Image & licensing notes
 
@@ -54,6 +55,8 @@ kubectl -n palantir-rag rollout status deploy/kafka-connect
 # Register the sink connector.
 kubectl apply -f pipelines/rag/02-cosmosdb-sink-news_embeddings.yaml
 kubectl -n palantir-rag logs job/register-cosmosdb-sink -f
+kubectl apply -f pipelines/rag/03-cosmosdb-sink-companies.yaml
+kubectl -n palantir-rag logs job/register-cosmosdb-sink-companies -f
 ```
 
 ## Monitor
