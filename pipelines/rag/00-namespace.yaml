@@ -1,0 +1,7 @@
+---
+# Dedicated namespace for the self-hosted (open-source) Kafka + Kafka Connect
+# stack that runs the Microsoft CosmosDB Sink Connector for the RAG pipeline.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: palantir-rag

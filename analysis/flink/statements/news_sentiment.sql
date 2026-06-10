@@ -22,7 +22,7 @@ DISTRIBUTED BY HASH(news_id) INTO 6 BUCKETS
 WITH (
   'kafka.consumer.isolation-level' = 'read-uncommitted',
   'kafka.cleanup-policy' = 'compact',
-  'changelog.mode' = 'upsert',
+  'changelog.mode' = 'append',
   'key.format' = 'json-registry',
   'value.format' = 'json-registry'
 );
