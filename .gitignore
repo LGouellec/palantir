@@ -6,6 +6,8 @@ chrome_investing/
 chrome_seeking/
 seeking_cookies.json
 
+rag-fetch/
+
 # Output directories
 articles/
 output/

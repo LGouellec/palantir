@@ -104,7 +104,7 @@ CREATE TABLE palantir_vector_search (
   >>,
   url STRING,
   title STRING,
-  published_date TIMESTAMP_LTZ(3),
+  published_date BIGINT,
   category ARRAY<STRING>,
   source STRING,
   embeddings ARRAY<FLOAT>
