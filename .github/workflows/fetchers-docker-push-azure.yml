@@ -1,0 +1,133 @@
+name: Stock Fetchers Build and Push to Azure ACR
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+env:
+  ACR_NAME: palantiracr
+  IMAGE_LONGBRIDGE_WORKER_NAME: palantir/longbridge-worker
+  IMAGE_LONGBRIDGE_OPERATOR_NAME: palantir/longbridge-operator
+  CONTEXT_PATH: ./fetchers/longbridge
+  DOCKERFILE_WORKER_PATH: ./fetchers/longbridge/worker/Dockerfile
+  DOCKERFILE_OPERATOR_PATH: ./fetchers/longbridge/operator/Dockerfile
+
+jobs:
+  build-and-push-acr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      # Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      # Set up Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      # Generate tags
+      - name: Generate tags
+        id: generate-tags
+        run: |
+          ACR_REGISTRY="${{ env.ACR_NAME }}.azurecr.io"
+          IMAGE_WORKER="${ACR_REGISTRY}/${{ env.IMAGE_LONGBRIDGE_WORKER_NAME }}"
+          IMAGE_OPERATOR="${ACR_REGISTRY}/${{ env.IMAGE_LONGBRIDGE_OPERATOR_NAME }}"
+
+          TAGS_WORKER="${IMAGE_WORKER}:latest"
+          TAGS_OPERATOR="${IMAGE_OPERATOR}:latest"
+
+          # Add branch name tag
+          if [[ "${{ github.ref }}" == refs/heads/* ]]; then
+            BRANCH_NAME=${GITHUB_REF#refs/heads/}
+            TAGS_WORKER="${TAGS_WORKER},${IMAGE_WORKER}:${BRANCH_NAME}"
+            TAGS_OPERATOR="${TAGS_OPERATOR},${IMAGE_OPERATOR}:${BRANCH_NAME}"
+          fi
+
+          # Add semver tags for releases
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            TAGS_WORKER="${TAGS_WORKER},${IMAGE_WORKER}:${VERSION}"
+            TAGS_OPERATOR="${TAGS_OPERATOR},${IMAGE_OPERATOR}:${VERSION}"
+            MAJOR=$(echo $VERSION | cut -d. -f1)
+            MINOR=$(echo $VERSION | cut -d. -f1-2)
+            TAGS_WORKER="${TAGS_WORKER},${IMAGE_WORKER}:${MAJOR},${IMAGE_WORKER}:${MINOR}"
+            TAGS_OPERATOR="${TAGS_OPERATOR},${IMAGE_OPERATOR}:${MAJOR},${IMAGE_OPERATOR}:${MINOR}"
+          fi
+
+          # Add SHA tag
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          TAGS_WORKER="${TAGS_WORKER},${IMAGE_WORKER}:sha-${SHORT_SHA}"
+          TAGS_OPERATOR="${TAGS_OPERATOR},${IMAGE_OPERATOR}:sha-${SHORT_SHA}"
+
+          echo "tags_worker=${TAGS_WORKER}" >> $GITHUB_OUTPUT
+          echo "tags_operator=${TAGS_OPERATOR}" >> $GITHUB_OUTPUT
+          echo "Generated tags worker: ${TAGS_WORKER}"
+          echo "Generated tags operator: ${TAGS_OPERATOR}"
+      # Login Docker registry
+      - name: Login to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: "${{ env.ACR_NAME }}.azurecr.io"
+          username: ${{ vars.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+      # Build and push Docker image Worker
+      - name: Build and push Worker Docker image to ACR
+        id: build-and-push-worker
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.CONTEXT_PATH }}
+          file: ${{ env.DOCKERFILE_WORKER_PATH }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.generate-tags.outputs.tags_worker }}
+          cache-from: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_LONGBRIDGE_WORKER_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_LONGBRIDGE_WORKER_NAME }}:buildcache,mode=max
+          build-args: |
+            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            VERSION=${{ github.ref_name }}
+            REVISION=${{ github.sha }}
+      # Build and push Docker image Operator
+      - name: Build and push Operator Docker image to ACR
+        id: build-and-push-operator
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.CONTEXT_PATH }}
+          file: ${{ env.DOCKERFILE_OPERATOR_PATH }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.generate-tags.outputs.tags_operator }}
+          cache-from: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_LONGBRIDGE_OPERATOR_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_LONGBRIDGE_OPERATOR_NAME }}:buildcache,mode=max
+          build-args: |
+            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            VERSION=${{ github.ref_name }}
+            REVISION=${{ github.sha }}
+       # Summary
+      - name: Create job summary
+        if: always()
+        run: |
+          echo "## Azure ACR Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry:** \`${{ env.ACR_NAME }}.azurecr.io\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Images Built" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Worker:** \`${{ env.IMAGE_LONGBRIDGE_WORKER_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Operator:** \`${{ env.IMAGE_LONGBRIDGE_OPERATOR_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Tags" >> $GITHUB_STEP_SUMMARY
+          echo "**Worker:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.generate-tags.outputs.tags_worker }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Operator:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.generate-tags.outputs.tags_operator }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Digests" >> $GITHUB_STEP_SUMMARY
+          echo "- **Worker:** \`${{ steps.build-and-push-worker.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Operator:** \`${{ steps.build-and-push-operator.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY

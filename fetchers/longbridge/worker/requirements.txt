@@ -1,0 +1,2 @@
+longport>=3.0.23
+confluent-kafka>=2.14.2
