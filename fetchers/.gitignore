@@ -1,0 +1,3 @@
+# Local credentials for docker-compose — never commit these.
+.env
+!.env.example
