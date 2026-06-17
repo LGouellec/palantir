@@ -1,0 +1,8 @@
+# Local smoke-test artifacts and real credentials — never commit these.
+local/
+creds/
+*-secret.yaml
+!*-secret.example.yaml
+.env
+__pycache__/
+*.pyc

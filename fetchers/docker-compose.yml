@@ -1,9 +1,15 @@
-# Local single-shard smoke test (no operator / no Kubernetes).
-# Provide a symbols file and Longbridge credentials, then `docker compose up`.
+# Local smoke test for the fetchers (no Kubernetes). A single Kafka broker is
+# shared by every fetcher; bring up only the one you need:
 #
-#   1. echo '["AAPL.US","MSFT.US","TSLA.US"]' > ./local/us-equities.json
-#   2. export LONGPORT_APP_KEY=... LONGPORT_APP_SECRET=... LONGPORT_ACCESS_TOKEN=...
-#   3. docker compose up --build
+#   # Alpaca real-time news -> news.realtime
+#   export APCA_API_KEY_ID=... APCA_API_SECRET_KEY=...
+#   export NEWS_SYMBOLS="AAPL,MSFT,TSLA"        # optional, default "*" = all
+#   docker compose up --build kafka alpaca-news
+#
+#   # Longbridge real-time quotes/depth -> quotes.realtime / quotes.depth
+#   echo '["AAPL.US","MSFT.US","TSLA.US"]' > ./longbridge/local/us-equities.json
+#   export LONGPORT_APP_KEY=... LONGPORT_APP_SECRET=... LONGPORT_ACCESS_TOKEN=...
+#   docker compose up --build kafka longbridge-shard
 services:
 
   kafka:
@@ -43,9 +49,25 @@ services:
       KAFKA_CONFLUENT_TELEMETRY_REMOTECONFIG_CONFLUENT_ENABLED: "false"
       KAFKA_CONFLUENT_CONSUMER_LAG_EMITTER_ENABLED: "false"
 
-  shard:
+  # Alpaca real-time news fetcher (single WebSocket, all symbols via "*").
+  alpaca-news:
     build:
-      context: .
+      context: ./alpaca
+      dockerfile: worker/Dockerfile
+    environment:
+      NEWS_SYMBOLS: ${NEWS_SYMBOLS:-*}
+      NEWS_TOPIC: ${NEWS_TOPIC:-news.realtime}
+      INCLUDE_CONTENT: ${INCLUDE_CONTENT:-true}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
+      APCA_API_KEY_ID: ${APCA_API_KEY_ID}
+      APCA_API_SECRET_KEY: ${APCA_API_SECRET_KEY}
+    depends_on:
+      - kafka
+
+  # Longbridge single-shard quote/depth fetcher (falls back to a shared account).
+  longbridge-shard:
+    build:
+      context: ./longbridge
       dockerfile: worker/Dockerfile
     environment:
       SHARD_INDEX: "0"
@@ -57,9 +79,10 @@ services:
       QUOTE_TOPIC: quotes.realtime
       DEPTH_TOPIC: quotes.depth
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
-      # Single shared account for local testing (falls back from per-shard creds).
       LONGPORT_APP_KEY: ${LONGPORT_APP_KEY}
       LONGPORT_APP_SECRET: ${LONGPORT_APP_SECRET}
       LONGPORT_ACCESS_TOKEN: ${LONGPORT_ACCESS_TOKEN}
     volumes:
-      - ./local:/config:ro
+      - ./longbridge/local:/config:ro
+    depends_on:
+      - kafka

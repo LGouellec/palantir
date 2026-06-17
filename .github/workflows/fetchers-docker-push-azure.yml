@@ -10,9 +10,12 @@ env:
   ACR_NAME: palantiracr
   IMAGE_LONGBRIDGE_WORKER_NAME: palantir/longbridge-worker
   IMAGE_LONGBRIDGE_OPERATOR_NAME: palantir/longbridge-operator
+  IMAGE_ALPACA_NEWS_NAME: palantir/alpaca-news-fetcher
   CONTEXT_PATH: ./fetchers/longbridge
   DOCKERFILE_WORKER_PATH: ./fetchers/longbridge/worker/Dockerfile
   DOCKERFILE_OPERATOR_PATH: ./fetchers/longbridge/operator/Dockerfile
+  CONTEXT_ALPACA_PATH: ./fetchers/alpaca
+  DOCKERFILE_ALPACA_PATH: ./fetchers/alpaca/worker/Dockerfile
 
 jobs:
   build-and-push-acr:
@@ -35,15 +38,18 @@ jobs:
           ACR_REGISTRY="${{ env.ACR_NAME }}.azurecr.io"
           IMAGE_WORKER="${ACR_REGISTRY}/${{ env.IMAGE_LONGBRIDGE_WORKER_NAME }}"
           IMAGE_OPERATOR="${ACR_REGISTRY}/${{ env.IMAGE_LONGBRIDGE_OPERATOR_NAME }}"
+          IMAGE_ALPACA="${ACR_REGISTRY}/${{ env.IMAGE_ALPACA_NEWS_NAME }}"
 
           TAGS_WORKER="${IMAGE_WORKER}:latest"
           TAGS_OPERATOR="${IMAGE_OPERATOR}:latest"
+          TAGS_ALPACA="${IMAGE_ALPACA}:latest"
 
           # Add branch name tag
           if [[ "${{ github.ref }}" == refs/heads/* ]]; then
             BRANCH_NAME=${GITHUB_REF#refs/heads/}
             TAGS_WORKER="${TAGS_WORKER},${IMAGE_WORKER}:${BRANCH_NAME}"
             TAGS_OPERATOR="${TAGS_OPERATOR},${IMAGE_OPERATOR}:${BRANCH_NAME}"
+            TAGS_ALPACA="${TAGS_ALPACA},${IMAGE_ALPACA}:${BRANCH_NAME}"
           fi
 
           # Add semver tags for releases
@@ -51,21 +57,26 @@ jobs:
             VERSION=${GITHUB_REF#refs/tags/v}
             TAGS_WORKER="${TAGS_WORKER},${IMAGE_WORKER}:${VERSION}"
             TAGS_OPERATOR="${TAGS_OPERATOR},${IMAGE_OPERATOR}:${VERSION}"
+            TAGS_ALPACA="${TAGS_ALPACA},${IMAGE_ALPACA}:${VERSION}"
             MAJOR=$(echo $VERSION | cut -d. -f1)
             MINOR=$(echo $VERSION | cut -d. -f1-2)
             TAGS_WORKER="${TAGS_WORKER},${IMAGE_WORKER}:${MAJOR},${IMAGE_WORKER}:${MINOR}"
             TAGS_OPERATOR="${TAGS_OPERATOR},${IMAGE_OPERATOR}:${MAJOR},${IMAGE_OPERATOR}:${MINOR}"
+            TAGS_ALPACA="${TAGS_ALPACA},${IMAGE_ALPACA}:${MAJOR},${IMAGE_ALPACA}:${MINOR}"
           fi
 
           # Add SHA tag
           SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
           TAGS_WORKER="${TAGS_WORKER},${IMAGE_WORKER}:sha-${SHORT_SHA}"
           TAGS_OPERATOR="${TAGS_OPERATOR},${IMAGE_OPERATOR}:sha-${SHORT_SHA}"
+          TAGS_ALPACA="${TAGS_ALPACA},${IMAGE_ALPACA}:sha-${SHORT_SHA}"
 
           echo "tags_worker=${TAGS_WORKER}" >> $GITHUB_OUTPUT
           echo "tags_operator=${TAGS_OPERATOR}" >> $GITHUB_OUTPUT
+          echo "tags_alpaca=${TAGS_ALPACA}" >> $GITHUB_OUTPUT
           echo "Generated tags worker: ${TAGS_WORKER}"
           echo "Generated tags operator: ${TAGS_OPERATOR}"
+          echo "Generated tags alpaca: ${TAGS_ALPACA}"
       # Login Docker registry
       - name: Login to container registry
         uses: docker/login-action@v3
@@ -105,6 +116,22 @@ jobs:
             BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
             VERSION=${{ github.ref_name }}
             REVISION=${{ github.sha }}
+      # Build and push Docker image Alpaca news fetcher
+      - name: Build and push Alpaca news Docker image to ACR
+        id: build-and-push-alpaca
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.CONTEXT_ALPACA_PATH }}
+          file: ${{ env.DOCKERFILE_ALPACA_PATH }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.generate-tags.outputs.tags_alpaca }}
+          cache-from: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_ALPACA_NEWS_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_ALPACA_NEWS_NAME }}:buildcache,mode=max
+          build-args: |
+            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            VERSION=${{ github.ref_name }}
+            REVISION=${{ github.sha }}
        # Summary
       - name: Create job summary
         if: always()
@@ -116,6 +143,7 @@ jobs:
           echo "### Images Built" >> $GITHUB_STEP_SUMMARY
           echo "1. **Worker:** \`${{ env.IMAGE_LONGBRIDGE_WORKER_NAME }}\`" >> $GITHUB_STEP_SUMMARY
           echo "2. **Operator:** \`${{ env.IMAGE_LONGBRIDGE_OPERATOR_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Alpaca news:** \`${{ env.IMAGE_ALPACA_NEWS_NAME }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Tags" >> $GITHUB_STEP_SUMMARY
           echo "**Worker:**" >> $GITHUB_STEP_SUMMARY
@@ -128,6 +156,12 @@ jobs:
           echo "${{ steps.generate-tags.outputs.tags_operator }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Alpaca news:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.generate-tags.outputs.tags_alpaca }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Digests" >> $GITHUB_STEP_SUMMARY
           echo "- **Worker:** \`${{ steps.build-and-push-worker.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Operator:** \`${{ steps.build-and-push-operator.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Alpaca news:** \`${{ steps.build-and-push-alpaca.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
