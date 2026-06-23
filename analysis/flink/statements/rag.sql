@@ -65,7 +65,8 @@ WITH (
 SET 'sql.local-time-zone' = 'UTC';
 SET 'sql.state-ttl'= '10 d';
 SET 'sql.tables.scan.idle-timeout'= '30 s';
-SET 'sql.tables.scan.startup.mode' ='earliest-offset';
+SET 'sql.tables.scan.startup.mode' ='timestamp';
+SET 'sql.tables.scan.startup.timestamp-millis' = '1782086400000';
 
 INSERT INTO `news_embedding`
 SELECT 
@@ -83,11 +84,13 @@ LATERAL TABLE(AI_EMBEDDING('palantir_embed',
     ARRAY_JOIN(
         ARRAY_SLICE(
             SPLIT(REGEXP_REPLACE(TRIM(n.full_content), '\s+', ' '), ' '),
-        1, 2500
+        1, 1000
         ),
-    ' '
-  ))) AS e(embedding)
+    ' '),
+  MAP['retry_count', '10', 'client_timeout', '60', 'debug', 'true']
+  )) AS e(embedding)
 WHERE n.content IS NOT NULL
+-- 'max_parallelism', '2', 'async_enabled', 'true'
 
 ---
 
