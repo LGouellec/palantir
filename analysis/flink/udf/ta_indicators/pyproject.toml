@@ -1,0 +1,45 @@
+[project]
+name = "ta_udf"
+version = "0.1.0"
+description = "Technical-analysis scalar UDF for Confluent Cloud for Apache Flink"
+# Confluent Cloud Python UDFs run on Python 3.11 only.
+requires-python = "==3.11.*"
+# NOTE: pandas-ta-classic pulls numpy 2.x — do not pin numpy below 2.0 or
+# resolution fails. If PyFlink 2.0.0's own numpy bound conflicts on upload,
+# relax it here rather than re-pinning numpy down.
+dependencies = [
+    "pandas-ta-classic",
+    "pandas>=3.0.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+# Ship the package source; Confluent resolves the deps from the sdist metadata.
+include = ["src/ta_udf"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ta_udf"]
+
+[tool.uv]
+# Confluent Cloud currently supports *exactly* these runtime versions. Pinning
+# them as constraints keeps `uv` from resolving an incompatible PyFlink.
+constraint-dependencies = [
+    "apache-flink==2.0.0",
+]
+
+[dependency-groups]
+# Dev-only: run the unit tests + local_run.py. These import ta_udf.compute,
+# which is pure pandas — NO PyFlink needed, so this group stays lightweight and
+# `uv run` (which syncs `dev` by default) works without building apache-flink.
+dev = [
+    "pytest>=9.1.0",
+]
+# Optional, opt-in: only needed to exercise the PyFlink wrapper (ta_udf.indicators)
+# locally. apache-flink 2.0.0 is heavy and can be awkward to build off-Linux, so
+# it is NOT synced by default. Use:  uv run --group flink ...
+flink = [
+    "apache-flink==2.0.0",
+]

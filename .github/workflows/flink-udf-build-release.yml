@@ -1,0 +1,92 @@
+name: Flink UDF Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+env:
+  UDF_DIR: ./analysis/flink/udf/ta_indicators
+  PACKAGE_NAME: ta_udf
+
+jobs:
+  build-and-release-udf:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # needed to upload assets to the GitHub Release
+
+    steps:
+      # Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      # Install uv (also pins/provisions Python 3.11 — the only version Confluent supports)
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.11'
+      # Run unit tests against the bare UDF function
+      - name: Run tests
+        working-directory: ${{ env.UDF_DIR }}
+        run: uv run --group dev pytest -q
+      # Resolve the artifact version: tag (vX.Y.Z -> X.Y.Z) or pyproject version on manual runs
+      - name: Resolve version
+        id: version
+        working-directory: ${{ env.UDF_DIR }}
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(uv version --short 2>/dev/null || grep -m1 '^version' pyproject.toml | sed -E 's/.*"(.*)".*/\1/')
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Artifact version: ${VERSION}"
+      # Build the source distribution and repackage it as the .zip Confluent Cloud expects
+      - name: Build UDF artifact
+        id: build
+        working-directory: ${{ env.UDF_DIR }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          uv build --sdist
+          ZIP_NAME="${{ env.PACKAGE_NAME }}-${VERSION}.zip"
+          # -FS sync, -j junk paths: the zip contains just the sdist tarball
+          zip -FS -j "dist/${ZIP_NAME}" dist/*.tar.gz
+          echo "zip_path=${{ env.UDF_DIR }}/dist/${ZIP_NAME}" >> $GITHUB_OUTPUT
+          echo "zip_name=${ZIP_NAME}" >> $GITHUB_OUTPUT
+          ls -lh dist/
+      # Always expose the artifact as a workflow artifact (useful for workflow_dispatch runs)
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.zip_name }}
+          path: ${{ steps.build.outputs.zip_path }}
+          if-no-files-found: error
+      # On tag pushes, attach the artifact to the GitHub Release for that tag
+      - name: Attach artifact to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.build.outputs.zip_path }}
+          fail_on_unmatched_files: true
+      # Summary
+      - name: Create job summary
+        if: always()
+        run: |
+          echo "## Flink UDF Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Package:** \`${{ env.PACKAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifact:** \`${{ steps.build.outputs.zip_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "Attached to release **${{ github.ref_name }}**." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Available as a workflow artifact (manual run — no release)." >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download the \`.zip\` and register it with:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "confluent flink artifact create ${{ env.PACKAGE_NAME }} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --artifact-file ${{ steps.build.outputs.zip_name }} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --cloud azure --region <region> --environment <env-id>" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
