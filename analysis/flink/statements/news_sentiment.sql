@@ -22,7 +22,7 @@ DISTRIBUTED BY HASH(news_id) INTO 6 BUCKETS
 WITH (
   'kafka.consumer.isolation-level' = 'read-uncommitted',
   'kafka.cleanup-policy' = 'compact',
-  'changelog.mode' = 'append',
+  'changelog.mode' = 'upsert',
   'key.format' = 'json-registry',
   'value.format' = 'json-registry'
 );
@@ -210,7 +210,7 @@ analyzed_filtered AS (
 SELECT
   af.news_id,
   af.content,
-  af.full_content,
+  SUBSTR(af.full_content, 1 , 6000) as full_content,
   CAST(
     ROW(
       ARRAY_AGG(

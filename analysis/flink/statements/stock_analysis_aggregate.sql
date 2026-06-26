@@ -23,6 +23,9 @@
 -- =============================================================================
 
 SET 'sql.local-time-zone' = 'UTC';
+SET 'sql.state-ttl' = '3 d';
+SET 'sql.tables.scan.startup.mode' ='timestamp';
+SET 'sql.tables.scan.startup.timestamp-millis' = '1782345600000';
 
 INSERT INTO `stock_quotes.analysis`
 WITH windowed AS (
@@ -40,11 +43,11 @@ WITH windowed AS (
     ARRAY_AGG(high)    OVER w AS high_window,
     ARRAY_AGG(low)     OVER w AS low_window,
     ARRAY_AGG(volume)  OVER w AS volume_window
-  FROM `stock_quotes.candles_1m`
+  FROM `stock_quotes.candles_15m`
   WINDOW w AS (
     PARTITION BY symbol
     ORDER BY `$rowtime`
-    ROWS BETWEEN 99 PRECEDING AND CURRENT ROW
+    ROWS BETWEEN 200 PRECEDING AND CURRENT ROW
   )
 ),
 enriched AS (
@@ -60,65 +63,63 @@ enriched AS (
     volume_ticks,
     ta_indicators(close_window, high_window, low_window, volume_window) AS ind
   FROM windowed
+),
+-- Top-of-book depth aggregated to the same 1-minute tumbling windows as the
+-- candles. spread = best_ask - best_bid (positive); averaged over the minute.
+-- Position 1 of each array is the best level. (For the closing spread instead,
+-- swap AVG(...) for LAST_VALUE(...) ordered by $rowtime.)
+depth_1m AS (
+  SELECT
+    symbol,
+    window_start,
+    AVG(bids[1].price)                  AS best_bid,
+    AVG(asks[1].price)                  AS best_ask,
+    AVG(asks[1].price - bids[1].price)  AS spread
+  FROM TABLE(
+    TUMBLE(TABLE `stock_quotes.depth`, DESCRIPTOR($rowtime), INTERVAL '1' MINUTE)
+  )
+  WHERE symbol IS NOT NULL
+    AND CARDINALITY(asks) > 0
+    AND CARDINALITY(bids) > 0
+  GROUP BY symbol, window_start, window_end
 )
 SELECT
-  symbol,
-  window_start,
-  window_end,
-  `open`,
-  high,
-  low,
-  `close`,
-  volume,
-  volume_ticks,
-  ind.sma,
-  ind.ema,
-  ind.rsi,
-  ind.macd,
-  ind.macd_signal,
-  ind.macd_hist,
-  ind.bb_lower,
-  ind.bb_mid,
-  ind.bb_upper,
-  ind.atr,
-  ind.obv,
-  ind.adx,
-  ind.di_plus,
-  ind.di_minus,
-  ind.sharpe,
-  ind.signal_score,
-  ind.signal_strength,
-  ind.signal
-FROM enriched
-WHERE ind.ema IS NOT NULL;
-
--- =============================================================================
--- FALLBACK: if your Confluent Cloud Flink version rejects ARRAY_AGG inside an
--- OVER window (it is documented for GROUP BY but not explicitly for OVER), build
--- the trailing arrays with MATCH_RECOGNIZE instead, which is supported for
--- sequence/pattern collection, then feed `ta_indicators` exactly as above:
---
---   FROM `stock_quotes.candles_1m`
---   MATCH_RECOGNIZE (
---     PARTITION BY symbol
---     ORDER BY `$rowtime`
---     MEASURES
---       LAST(C.window_start) AS window_start,
---       LAST(C.window_end)   AS window_end,
---       LAST(C.`open`)       AS `open`,
---       LAST(C.high)         AS high,
---       LAST(C.low)          AS low,
---       LAST(C.`close`)      AS `close`,
---       LAST(C.volume)       AS volume,
---       LAST(C.volume_ticks) AS volume_ticks,
---       ARRAY_AGG(C.`close`) AS close_window,
---       ARRAY_AGG(C.high)    AS high_window,
---       ARRAY_AGG(C.low)     AS low_window,
---       ARRAY_AGG(C.volume)  AS volume_window
---     ONE ROW PER MATCH
---     AFTER MATCH SKIP TO NEXT ROW
---     PATTERN (C{1,100})        -- up to the last 100 candles
---     DEFINE C AS TRUE
---   )
--- The UDF tolerates short windows (returns NULLs until enough history exists).
--- =============================================================================
+  e.symbol,
+  e.window_start,
+  e.window_end,
+  e.`open`,
+  e.high,
+  e.low,
+  e.`close`,
+  e.volume,
+  e.volume_ticks,
+  e.ind.sma,
+  e.ind.ema,
+  e.ind.rsi,
+  e.ind.macd,
+  e.ind.macd_signal,
+  e.ind.macd_hist,
+  e.ind.bb_lower,
+  e.ind.bb_mid,
+  e.ind.bb_upper,
+  e.ind.atr,
+  e.ind.obv,
+  e.ind.adx,
+  e.ind.di_plus,
+  e.ind.di_minus,
+  e.ind.sharpe,
+  e.ind.signal_score,
+  e.ind.signal_strength,
+  e.ind.signal,
+  d.best_bid,
+  d.best_ask,
+  d.spread
+FROM enriched e
+LEFT JOIN depth_1m d
+  ON e.symbol = d.symbol
+ AND e.window_start = d.window_start
+WHERE 1=1
+AND e.ind.ema IS NOT NULL
+AND e.volume > 100,000
+AND (e.ind.signal = 'BULLISH' OR e.ind.signal = 'BEARISH')
+AND ((d.spread * 100) / e.`close`) < 0.25;

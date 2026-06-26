@@ -1,5 +1,5 @@
 ---
-CREATE TABLE `stock_quotes.candles_1m` (
+CREATE TABLE `stock_quotes.candles_15m` (
   symbol STRING NOT NULL,
   window_start TIMESTAMP(3) NOT NULL,
   window_end TIMESTAMP(3) NOT NULL,
@@ -22,8 +22,10 @@ WITH (
 );
 ---
 SET 'sql.local-time-zone' = 'UTC';
+SET 'sql.tables.scan.startup.mode' ='timestamp';
+SET 'sql.tables.scan.startup.timestamp-millis' = '1781913600000';
 
-INSERT INTO `stock_quotes.candles_1m`
+INSERT INTO `stock_quotes.candles_15m`
 WITH hilo AS (
   SELECT
     symbol,
@@ -36,7 +38,7 @@ WITH hilo AS (
     TUMBLE(
       TABLE `stock_quotes.realtime`,
       DESCRIPTOR($rowtime),
-      INTERVAL '1' MINUTE
+      INTERVAL '15' MINUTE
     )
   )
   WHERE symbol IS NOT NULL
@@ -67,7 +69,7 @@ open_tick AS (
       TUMBLE(
         TABLE `stock_quotes.realtime`,
         DESCRIPTOR($rowtime),
-        INTERVAL '1' MINUTE
+        INTERVAL '15' MINUTE
       )
     )
     WHERE symbol IS NOT NULL
@@ -99,7 +101,7 @@ close_tick AS (
       TUMBLE(
         TABLE `stock_quotes.realtime`,
         DESCRIPTOR($rowtime),
-        INTERVAL '1' MINUTE
+        INTERVAL '15' MINUTE
       )
     )
     WHERE symbol IS NOT NULL
