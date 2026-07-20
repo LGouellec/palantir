@@ -49,7 +49,8 @@ CREATE TABLE news_embedding (
   published_date TIMESTAMP_LTZ(3),
   category ARRAY<STRING>,
   source STRING,
-  embeddings ARRAY<FLOAT>
+  embeddings ARRAY<FLOAT>,
+  PRIMARY KEY (news_id) NOT ENFORCED
 )
 DISTRIBUTED BY HASH(news_id) INTO 6 BUCKETS
 WITH (
@@ -65,8 +66,9 @@ WITH (
 SET 'sql.local-time-zone' = 'UTC';
 SET 'sql.state-ttl'= '10 d';
 SET 'sql.tables.scan.idle-timeout'= '30 s';
-SET 'sql.tables.scan.startup.mode' ='timestamp';
-SET 'sql.tables.scan.startup.timestamp-millis' = '1782086400000';
+SET 'sql.tables.scan.startup.mode' ='earliest-offset';
+-- SET 'sql.tables.scan.startup.mode' ='timestamp';
+-- SET 'sql.tables.scan.startup.timestamp-millis' = '1782086400000';
 
 INSERT INTO `news_embedding`
 SELECT 
@@ -81,12 +83,13 @@ SELECT
     embedding AS embeddings
 FROM `news` n,
 LATERAL TABLE(AI_EMBEDDING('palantir_embed', 
-    ARRAY_JOIN(
-        ARRAY_SLICE(
-            SPLIT(REGEXP_REPLACE(TRIM(n.full_content), '\s+', ' '), ' '),
-        1, 1000
-        ),
-    ' '),
+    CONCAT('Date : ', CAST(published_date AS STRING), 
+        ARRAY_JOIN(
+            ARRAY_SLICE(
+                SPLIT(REGEXP_REPLACE(TRIM(n.full_content), '\s+', ' '), ' '),
+            1, 1000
+            ),
+        ' ')),
   MAP['retry_count', '10', 'client_timeout', '60', 'debug', 'true']
   )) AS e(embedding)
 WHERE n.content IS NOT NULL

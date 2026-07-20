@@ -22,8 +22,11 @@ WITH (
 );
 ---
 SET 'sql.local-time-zone' = 'UTC';
-SET 'sql.tables.scan.startup.mode' ='timestamp';
-SET 'sql.tables.scan.startup.timestamp-millis' = '1781913600000';
+SET 'sql.state-ttl'= '7 d';
+SET 'sql.tables.scan.idle-timeout'= '30 s';
+SET 'sql.tables.scan.startup.mode' ='earliest-offset';
+-- SET 'sql.tables.scan.startup.mode' ='timestamp';
+-- SET 'sql.tables.scan.startup.timestamp-millis' = '1781913600000';
 
 INSERT INTO `stock_quotes.candles_15m`
 WITH hilo AS (

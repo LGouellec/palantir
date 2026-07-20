@@ -24,8 +24,9 @@
 
 SET 'sql.local-time-zone' = 'UTC';
 SET 'sql.state-ttl' = '3 d';
-SET 'sql.tables.scan.startup.mode' ='timestamp';
-SET 'sql.tables.scan.startup.timestamp-millis' = '1782345600000';
+SET 'sql.tables.scan.startup.mode' ='earliest-offset';
+-- SET 'sql.tables.scan.startup.mode' ='timestamp';
+-- SET 'sql.tables.scan.startup.timestamp-millis' = '1782345600000';
 
 INSERT INTO `stock_quotes.analysis`
 WITH windowed AS (

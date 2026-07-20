@@ -1,0 +1,10 @@
+{
+    "subject": "stock_quotes.depth-value",
+    "schemaType": "JSON",
+    "metadata": {
+        "properties": {
+            "confluent:version": "1"
+        }
+    },
+    "schema": "{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"$id\":\"http://example.com/myURI.schema.json\",\"title\":\"SampleRecord\",\"description\":\"This schema has been created from JSON messages.\",\"type\":\"object\",\"properties\":{\"asks\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"order_num\":{\"type\":\"number\"},\"position\":{\"type\":\"number\"},\"price\":{\"type\":\"number\"},\"volume\":{\"type\":\"number\"}}}},\"bids\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"order_num\":{\"type\":\"number\"},\"position\":{\"type\":\"number\"},\"price\":{\"type\":\"number\"},\"volume\":{\"type\":\"number\"}}}},\"event_type\":{\"type\":\"string\"},\"ingest_time\":{\"type\":\"string\"},\"longbridge_symbol\":{\"type\":\"string\"},\"source\":{\"type\":\"string\"},\"symbol\":{\"type\":\"string\"}}}"
+}

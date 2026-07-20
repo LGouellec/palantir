@@ -1,0 +1,10 @@
+{
+    "subject": "stock_quotes.realtime-value",
+    "schemaType": "JSON",
+    "metadata": {
+        "properties": {
+            "confluent:version": "1"
+        }
+    },
+    "schema": "{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"$id\":\"http://example.com/myURI.schema.json\",\"title\":\"SampleRecord\",\"description\":\"This schema has been created from JSON messages.\",\"type\":\"object\",\"properties\":{\"event_time\":{\"type\":\"string\"},\"event_type\":{\"type\":\"string\"},\"high\":{\"type\":\"number\"},\"ingest_time\":{\"type\":\"string\"},\"last_done\":{\"type\":\"number\"},\"longbridge_symbol\":{\"type\":\"string\"},\"low\":{\"type\":\"number\"},\"open\":{\"type\":\"number\"},\"source\":{\"type\":\"string\"},\"symbol\":{\"type\":\"string\"},\"trade_session\":{\"type\":\"string\"},\"trade_status\":{\"type\":\"string\"},\"turnover\":{\"type\":\"number\"},\"volume\":{\"type\":\"number\"}}}"
+}
