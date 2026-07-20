@@ -1,5 +1,5 @@
 ---
--- Merge vector_search + Company news from HTTP Endpoint + stock_analysis with a specific criteria (force du signal)
+-- Merge vector_search + Company news from HTTP Endpoint + Current news + stock_analysis with a specific criteria (force du signal)
 -- Appeler un modele IA avec un Agent (Determiner le prix + stop loss + exit)
 -- plus Forecast
 ---
