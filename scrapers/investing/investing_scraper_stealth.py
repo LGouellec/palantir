@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from scrapling.fetchers import StealthyFetcher
 from investing_scraper_base import InvestingScraperBase
-
+from playwright.sync_api import Page
 
 class InvestingScraperStealth(InvestingScraperBase):
     """
@@ -55,7 +55,7 @@ class InvestingScraperStealth(InvestingScraperBase):
         # Build URL based on analysis flag
         url_type = "analysis" if analysis else "news"
         self.category_url = f"https://www.investing.com/{url_type}/{category}"
-        self.solve_cloudflare = False
+        self.solve_cloudflare = True
 
         # Call parent constructor
         super().__init__(
@@ -177,6 +177,10 @@ class InvestingScraperStealth(InvestingScraperBase):
             # Reset counter anyway to avoid infinite loop
             self.consecutive_403_count = 0
 
+    def by_pass_captcha(self, page: Page):
+        page.screenshot(path=f'./screenshot.png', full_page=False)
+        return
+    
     def fetch(self, url: str):
         """Fetch page with StealthyFetcher and 403 handling with retry after cleanup"""
         while True:
@@ -190,7 +194,7 @@ class InvestingScraperStealth(InvestingScraperBase):
                     url,
                     headless=self.headless,
                     user_data_dir=self.user_data_dir,
-                    network_idle=False,
+                    network_idle=True,
                     load_dom=False,
                     disable_resources=True,
                     solve_cloudflare=self.solve_cloudflare,
@@ -199,7 +203,8 @@ class InvestingScraperStealth(InvestingScraperBase):
                     google_search=False,
                     proxy=proxy,
                     retries=5,
-                    timeout=60000
+                    timeout=60000,
+                    page_action=self.by_pass_captcha
                 )
 
                 if response.status == 403 or response.status == 401:
