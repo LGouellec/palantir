@@ -52,7 +52,7 @@ WITH (
 CREATE FUNCTION ta_indicators
   AS 'ta_udf.indicators.ta_indicators'
   LANGUAGE PYTHON
-  USING JAR 'confluent-artifact://cfa-devcgn96p3';
+  USING JAR 'confluent-artifact://cfa-g355zr';
 ---
 -- The aggregation + UDF call query lives in stock_candle_1m_ta_aggregate.sql.
 -- Run it after the sink table and the function above have been created.

@@ -121,6 +121,6 @@ LEFT JOIN depth_1m d
  AND e.window_start = d.window_start
 WHERE 1=1
 AND e.ind.ema IS NOT NULL
-AND e.volume > 100,000
+AND e.volume > 1000000
 AND (e.ind.signal = 'BULLISH' OR e.ind.signal = 'BEARISH')
 AND ((d.spread * 100) / e.`close`) < 0.25;

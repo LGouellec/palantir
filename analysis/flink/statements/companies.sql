@@ -78,7 +78,7 @@ WITH (
 );
 ---
 SET 'sql.local-time-zone' = 'UTC';
-SET 'sql.tables.scan.startup.mode' ='latest-offset';
+SET 'sql.tables.scan.startup.mode' ='earliest-offset';
 
 INSERT INTO `companies`
   SELECT

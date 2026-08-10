@@ -29,7 +29,7 @@ LATERAL TABLE(AI_EMBEDDING('palantir_embed', t.name)) AS e(embedding);
     WITH (
         'type' = 'cosmosdb',
         'endpoint' = 'https://palantir-rag.documents.azure.com:443/',
-        'api-key' = 'YYYYYY'
+        'api-key' = 'XXXXX'
     );
 ---
 
@@ -70,9 +70,10 @@ SET 'sql.tables.scan.startup.mode' ='earliest-offset';
 -- SET 'sql.tables.scan.startup.mode' ='timestamp';
 -- SET 'sql.tables.scan.startup.timestamp-millis' = '1782086400000';
 
-INSERT INTO `news_embedding`
-SELECT 
-    n.news_id, 
+
+INSERT INTO news_embedding
+SELECT
+    n.news_id,
     n.content,
     n.sentiment,
     n.url,
@@ -80,19 +81,25 @@ SELECT
     n.published_date,
     n.category,
     n.source,
-    embedding AS embeddings
-FROM `news` n,
-LATERAL TABLE(AI_EMBEDDING('palantir_embed', 
-    CONCAT('Date : ', CAST(published_date AS STRING), 
-        ARRAY_JOIN(
-            ARRAY_SLICE(
-                SPLIT(REGEXP_REPLACE(TRIM(n.full_content), '\s+', ' '), ' '),
-            1, 1000
-            ),
-        ' ')),
+    e.embedding AS embeddings
+FROM (
+    SELECT *
+    FROM news
+    WHERE full_content IS NOT NULL
+      AND CHARACTER_LENGTH(TRIM(full_content)) > 0
+) n
+CROSS JOIN LATERAL TABLE(
+  AI_EMBEDDING(
+    'palantir_embed',
+    CONCAT(
+      'Date: ',
+      COALESCE(CAST(n.published_date AS STRING), ''),
+      ' ',
+      n.full_content
+    ),
   MAP['retry_count', '10', 'client_timeout', '60', 'debug', 'true']
-  )) AS e(embedding)
-WHERE n.content IS NOT NULL
+  )) AS e(embedding);
+
 -- 'max_parallelism', '2', 'async_enabled', 'true'
 
 ---

@@ -1,0 +1,65 @@
+{
+  "$id": "http://example.com/myURI.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "This schema has been created from JSON messages.",
+  "properties": {
+    "author": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "event_type": {
+      "type": "string"
+    },
+    "fetch_source": {
+      "type": "string"
+    },
+    "headline": {
+      "type": "string"
+    },
+    "id": {
+      "type": "number"
+    },
+    "images": {
+      "items": {
+        "properties": {
+          "size": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "ingest_time": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "symbols": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "updated_at": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    }
+  },
+  "title": "SampleRecord",
+  "type": "object"
+}

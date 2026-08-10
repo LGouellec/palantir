@@ -13,10 +13,10 @@ metadata:
   namespace: palantir-rag
 type: Opaque
 stringData:
-  bootstrap-servers: "XXXXX.us-east-2.aws.confluent.cloud:9092"
-  kafka-api-key: "XXXXX"
-  kafka-api-secret: "XXXXX"
-  schema-registry-url: "https://XXXXX.us-west-2.aws.confluent.cloud"
+  bootstrap-servers: "XXXX"
+  kafka-api-key: "XXXX"
+  kafka-api-secret: "XXXX"
+  schema-registry-url: "https://XXXX.us-west-2.aws.confluent.cloud"
   schema-registry-api-key: "XXXXX"
   schema-registry-api-secret: "XXXXX"
 ---
