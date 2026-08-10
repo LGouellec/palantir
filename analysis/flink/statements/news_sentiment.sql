@@ -18,7 +18,7 @@ CREATE TABLE news (
   source STRING,
   PRIMARY KEY (news_id) NOT ENFORCED
 )
-DISTRIBUTED BY HASH(news_id) INTO 6 BUCKETS
+DISTRIBUTED BY HASH(news_id) INTO 24 BUCKETS
 WITH (
   'kafka.consumer.isolation-level' = 'read-uncommitted',
   'kafka.cleanup-policy' = 'compact',
