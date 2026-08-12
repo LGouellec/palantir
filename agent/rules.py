@@ -42,6 +42,10 @@ class AccountSnapshot:
     buying_power: float
     total_exposure_usd: float
     positions: Dict[str, Position]
+    # Whether NYSE/NASDAQ is currently open (alpaca_trading.py populates this
+    # from Alpaca's clock endpoint). Defaults to True so callers/tests that
+    # don't care about market hours are unaffected.
+    market_open: bool = True
 
     @property
     def daily_pnl_pct(self) -> float:
@@ -92,6 +96,12 @@ def decide(signal: TradeSignal, snapshot: AccountSnapshot, cfg) -> Action:
 
     if signal.signal == "SELL" and held_side is None and not cfg.short_selling_enabled:
         return Action.no_op(signal.symbol, "no_margin_short_not_supported")
+
+    # New trades (entries and scale-ins) only happen while NYSE/NASDAQ is
+    # open; a closed market still lets the protective-exit branches above
+    # run, but everything below here is a new/added position.
+    if not snapshot.market_open:
+        return Action.no_op(signal.symbol, "market_closed")
 
     if circuit_breaker_tripped:
         return Action.no_op(signal.symbol, "circuit_breaker")

@@ -37,6 +37,9 @@ class AlpacaTrading:
     # ------------------------------------------------------------------ #
     # Snapshot: everything rules.decide() needs about the account.
     # ------------------------------------------------------------------ #
+    def is_market_open(self) -> bool:
+        return bool(self._client.get_clock().is_open)
+
     def build_snapshot(self, symbol: str) -> AccountSnapshot:
         account = self._client.get_account()
         equity = float(account.equity or 0)
@@ -78,6 +81,7 @@ class AlpacaTrading:
             buying_power=buying_power,
             total_exposure_usd=total_exposure_usd,
             positions=positions,
+            market_open=self.is_market_open(),
         )
 
     def _open_bracket_legs(
