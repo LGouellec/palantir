@@ -50,13 +50,35 @@ def _process_message(msg, cfg: WorkerConfig, trading: AlpacaTrading) -> None:
 
     snapshot = trading.build_snapshot(trade_signal.symbol)
     action = decide(trade_signal, snapshot, cfg)
+    _log_and_execute(trade_signal, action, cfg, trading)
 
+    if action.kind == "CLOSE_POSITION" and action.follow_up_signal is not None:
+        # This CLOSE_POSITION freed up exposure for action.follow_up_signal
+        # (portfolio reorientation), not a plain SELL/BUY-cover exit. The
+        # snapshot above is now stale for that signal - equity/exposure no
+        # longer reflect the just-closed position - so pull a fresh one and
+        # re-decide once before moving on, rather than dropping the
+        # more-profitable signal on the floor until another one happens to
+        # arrive for the same symbol.
+        follow_up_signal = action.follow_up_signal
+        logger.info(
+            "🔁 Reoriented portfolio (closed %s); refreshing account state to retry %s",
+            action.symbol,
+            follow_up_signal.symbol,
+        )
+        refreshed_snapshot = trading.build_snapshot(follow_up_signal.symbol)
+        follow_up_action = decide(follow_up_signal, refreshed_snapshot, cfg)
+        _log_and_execute(follow_up_signal, follow_up_action, cfg, trading)
+
+
+def _log_and_execute(trade_signal: TradeSignal, action, cfg: WorkerConfig, trading: AlpacaTrading) -> None:
     logger.info(
-        "📊 %s signal=%s close=%s -> %s (%s)%s",
+        "📊 %s signal=%s close=%s -> %s %s (%s)%s",
         trade_signal.symbol,
         trade_signal.signal,
         trade_signal.close,
         action.kind,
+        action.symbol,
         action.reason,
         f" qty={action.qty}" if action.qty else "",
     )
@@ -68,7 +90,7 @@ def _process_message(msg, cfg: WorkerConfig, trading: AlpacaTrading) -> None:
     try:
         trading.execute(action)
     except Exception:  # noqa: BLE001
-        logger.exception("❌ Failed to execute %s for %s", action.kind, trade_signal.symbol)
+        logger.exception("❌ Failed to execute %s for %s", action.kind, action.symbol)
 
 
 def main() -> int:

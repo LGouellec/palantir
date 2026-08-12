@@ -62,6 +62,14 @@ class Action:
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     client_order_id: Optional[str] = None
+    # Set only on a portfolio-reorientation CLOSE_POSITION (see
+    # _reorient_for_better_signal): the signal that couldn't be sized because
+    # the portfolio was fully booked. The runner must pull a fresh
+    # AccountSnapshot after executing this close and re-decide this signal
+    # against it - the snapshot used to produce this Action is now stale for
+    # that purpose (exposure/buying power no longer reflect the closed
+    # position).
+    follow_up_signal: Optional[TradeSignal] = None
 
     @classmethod
     def no_op(cls, symbol: str, reason: str) -> "Action":
@@ -196,6 +204,7 @@ def _reorient_for_better_signal(
         kind="CLOSE_POSITION",
         symbol=worst_symbol,
         reason=f"reorient_worst_position_for_more_profitable_signal:{signal.symbol}",
+        follow_up_signal=signal,
     )
 
 
