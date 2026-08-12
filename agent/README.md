@@ -66,9 +66,11 @@ exposure never exceeds `MAX_PORTFOLIO_UTILIZATION_PCT` of equity (plus
 portfolio is fully booked (total exposure at `MAX_PORTFOLIO_UTILIZATION_PCT`)
 and this signal's potential PnL beats our worst open position's unrealized
 P&L by at least `REORIENT_MIN_EDGE_PCT`, the decision is `CLOSE_POSITION` on
-that worst position instead of a no-op — freeing up exposure so a
-follow-up signal can size the new entry. Disable with
-`PORTFOLIO_REORIENT_ENABLED=false`.
+that worst position instead of a no-op. `runner.py` executes that close, then
+pulls a **fresh** `AccountSnapshot` and re-runs `rules.decide()` for the
+original signal against it (once — no further chained reorientation), rather
+than leaving the now-actionable signal to wait for a follow-up message on the
+same symbol. Disable with `PORTFOLIO_REORIENT_ENABLED=false`.
 
 Every decision is logged as `<symbol> signal=<BUY|HOLD|SELL> -> <Action>
 (<reason>)` — that log line is the audit trail for every order this agent
