@@ -1,0 +1,67 @@
+# Local smoke test (no Kubernetes, no Schema Registry). Brings up a bare
+# Kafka broker and the agent in DRY_RUN mode so a hand-published signal can
+# be run through the decision engine without placing a real order - it still
+# talks to Alpaca's paper-trading account API for account/position state,
+# so real (paper) credentials are required.
+#
+#   export APCA_API_KEY_ID=... APCA_API_SECRET_KEY=...
+#   docker compose up --build kafka trading-agent
+#
+# Then, from another shell, publish the example payload from spec.md:
+#
+#   docker exec -i kafka kafka-console-producer \
+#     --bootstrap-server localhost:9092 --topic stock_quotes.trade_signal < payload.json
+#
+# See agent/README.md for the full walkthrough.
+services:
+
+  kafka:
+    image: confluentinc/cp-server:8.2.0
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_METRIC_REPORTERS: io.confluent.telemetry.reporter.TelemetryReporter
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka:29092
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      CONFLUENT_METRICS_ENABLE: 'false'
+      CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_ENABLED: "false"
+      KAFKA_CONFLUENT_TELEMETRY_REMOTECONFIG_CONFLUENT_ENABLED: "false"
+      KAFKA_CONFLUENT_CONSUMER_LAG_EMITTER_ENABLED: "false"
+
+  trading-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      TRADE_SIGNAL_TOPIC: stock_quotes.trade_signal
+      CONSUMER_GROUP_ID: trading-agent-local
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # SCHEMA_REGISTRY_URL intentionally unset locally -> plain-JSON decoding.
+      TRADING_LIVE: "false"
+      DRY_RUN: "true"
+      APCA_API_KEY_ID: ${APCA_API_KEY_ID}
+      APCA_API_SECRET_KEY: ${APCA_API_SECRET_KEY}
+    depends_on:
+      - kafka

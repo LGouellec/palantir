@@ -1,0 +1,2 @@
+alpaca-py>=0.43.4
+confluent-kafka[schema-registry,json]>=2.14.2
