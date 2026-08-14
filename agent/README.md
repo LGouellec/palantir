@@ -14,7 +14,7 @@ Alpaca's servers rather than in this process's memory.
 ## Layout
 
 ```
-runner.py           entrypoint: wires config + credentials + Kafka + Alpaca, poll loop
+runner.py           entrypoint: wires config + credentials + Kafka + Alpaca, poll loop + sweep thread
 config.py            env-driven WorkerConfig (topics, risk thresholds, kafka)
 credentials.py        resolves Alpaca API key/secret (file or env)
 trade_signal.py        TradeSignal dataclass: parses/validates the Kafka payload
@@ -22,6 +22,7 @@ kafka_consumer.py       DeserializingConsumer (schema-registry, or plain-JSON lo
 alpaca_trading.py        alpaca-py TradingClient wrapper (account/positions/orders)
 risk.py                   pure sizing & threshold math (no I/O, easiest to unit test)
 rules.py                  BUY/HOLD/SELL decision engine -> Action
+position_review.py       periodic trailing-stop / stale-close review -> Action
 Dockerfile
 entrypoint.sh
 requirements.txt
@@ -76,6 +77,45 @@ Every decision is logged as `<symbol> signal=<BUY|HOLD|SELL> -> <Action>
 (<reason>)` — that log line is the audit trail for every order this agent
 does or doesn't place.
 
+## Periodic position review (background sweep)
+
+Everything above only fires when a Kafka signal arrives for a symbol.
+`runner.py` also starts a daemon thread (`_sweep_loop`) that runs
+`position_review.sweep()` immediately at startup and then every
+`POSITION_SWEEP_INTERVAL_S` (default 300s / 5 min), reviewing every open
+position against the live Alpaca account regardless of whether a signal has
+come in:
+
+1. **Stale/flat close** (`stale_position_enabled`, longs and shorts): this is
+   an *intraday* agent, so a position open at least
+   `STALE_POSITION_MAX_AGE_MINUTES` (default 120) with unrealized P&L within
+   `STALE_POSITION_FLAT_BAND_PCT` (default 0.5%) of flat is stuck capital —
+   `CLOSE_POSITION` frees it up rather than let it sit and risk missing a
+   fresher, moving signal elsewhere.
+2. **Profit-lock trailing stop** (`trailing_stop_enabled`, longs only): once a
+   long's unrealized P&L clears `TRAILING_STOP_TRIGGER_PCT` (default 5%):
+   - **First lock-in**: the resting stop jumps straight to
+     `max(avg_entry_price, current_price * (1 - TRAILING_STOP_TRAIL_PCT))` —
+     at least breakeven, immediately (not gradual).
+   - **Every sweep after that** (stop already at/above breakeven): the new
+     candidate is computed from the *last resting stop*, not from price
+     directly — it eases `TRAILING_STOP_STEP_PCT` (default 50%) of the
+     remaining distance from where the stop last rested toward
+     `current_price * (1 - TRAILING_STOP_TRAIL_PCT)`, converging on that
+     target over several sweeps instead of jumping straight to it. Never
+     loosened either way.
+
+A stale close preempts a stop adjustment on the same sweep (no point
+ratcheting a stop on a position about to be closed). Both rules are
+independently toggleable and, like the signal-driven path, respect
+`DRY_RUN` (log the decision, skip the Alpaca call).
+
+Position "age" has no direct Alpaca field — `alpaca_trading.position_opened_at()`
+derives a best-effort value from fill history (the earliest fill in the
+current unbroken run of entry-side fills since the position last went flat).
+This is correct for the agent's normal intraday lifecycle but is an
+approximation, not a real timestamp.
+
 ## Configuration
 
 | Env var | Default | Description |
@@ -101,6 +141,14 @@ does or doesn't place.
 | `PORTFOLIO_REORIENT_ENABLED` | `true` | when fully booked, sell the worst open position for a meaningfully more profitable signal instead of no-op'ing |
 | `REORIENT_MIN_EDGE_PCT` | `0.05` | how much a new signal's potential PnL must beat the worst position's unrealized P&L by to trigger a reorientation sell |
 | `POLL_TIMEOUT_S` | `5.0` | Kafka poll timeout |
+| `POSITION_SWEEP_INTERVAL_S` | `300.0` | how often the background position review runs |
+| `TRAILING_STOP_ENABLED` | `true` | ratchet a profitable long's stop up toward/behind the current price |
+| `TRAILING_STOP_TRIGGER_PCT` | `0.05` | unrealized P&L at which the trailing stop starts ratcheting |
+| `TRAILING_STOP_TRAIL_PCT` | `0.02` | how far behind the current price the ratcheted stop trails |
+| `TRAILING_STOP_STEP_PCT` | `0.5` | once past breakeven, fraction of the remaining gap to the trail target closed per sweep |
+| `STALE_POSITION_ENABLED` | `true` | close a position that's been open too long with flat P&L |
+| `STALE_POSITION_MAX_AGE_MINUTES` | `120` | age threshold for the stale-position close |
+| `STALE_POSITION_FLAT_BAND_PCT` | `0.005` | unrealized P&L band (± this) considered "flat" |
 | `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY` | – | Alpaca credentials (env) |
 | `ALPACA_CREDENTIALS_FILE` | `/secrets/credentials.json` | Alpaca credentials (file) |
 

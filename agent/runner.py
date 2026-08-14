@@ -16,6 +16,7 @@ import signal
 import sys
 import threading
 
+import position_review
 from alpaca_trading import AlpacaTrading
 from config import WorkerConfig
 from credentials import resolve_credentials
@@ -93,6 +94,18 @@ def _log_and_execute(trade_signal: TradeSignal, action, cfg: WorkerConfig, tradi
         logger.exception("❌ Failed to execute %s for %s", action.kind, action.symbol)
 
 
+def _sweep_loop(cfg: WorkerConfig, trading: AlpacaTrading) -> None:
+    """Background thread: reviews every open position against
+    position_review.py's trailing-stop / stale-close rules every
+    cfg.position_sweep_interval_s, independent of incoming Kafka signals."""
+    while not _shutdown.is_set():
+        try:
+            position_review.sweep(trading, cfg)
+        except Exception:  # noqa: BLE001
+            logger.exception("❌ Position sweep failed")
+        _shutdown.wait(cfg.position_sweep_interval_s)
+
+
 def main() -> int:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
@@ -111,6 +124,11 @@ def main() -> int:
 
     trading = AlpacaTrading(creds.api_key, creds.api_secret, paper=not cfg.trading_live)
     consumer = TradeSignalConsumer(cfg)
+
+    sweep_thread = threading.Thread(
+        target=_sweep_loop, args=(cfg, trading), name="position-sweep", daemon=True
+    )
+    sweep_thread.start()
 
     try:
         while not _shutdown.is_set():

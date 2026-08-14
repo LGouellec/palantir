@@ -7,11 +7,20 @@ over, and executes the Action rules.py decides on. Bracket orders
 protection lives on Alpaca's servers, not in this process's memory.
 """
 import logging
-from typing import Dict, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 
+from alpaca.common.enums import Sort
 from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderClass, OrderSide, PositionSide, QueryOrderStatus, TimeInForce
+from alpaca.trading.enums import (
+    OrderClass,
+    OrderSide,
+    OrderStatus,
+    PositionSide,
+    QueryOrderStatus,
+    TimeInForce,
+)
 from alpaca.trading.requests import (
     GetOrdersRequest,
     MarketOrderRequest,
@@ -23,6 +32,25 @@ from alpaca.trading.requests import (
 from rules import Action, AccountSnapshot, Position
 
 logger = logging.getLogger(__name__)
+
+
+def _match_bracket_legs(
+    orders: List, position_side: str
+) -> Tuple[Optional[str], Optional[float], Optional[str], Optional[float]]:
+    """Pick the resting stop-loss / take-profit legs out of `orders`: the
+    ones on the side that *closes* a position of `position_side` (SELL for a
+    long, BUY for a short) - one with a stop_price, one with a limit_price."""
+    closing_side = OrderSide.BUY if position_side == "short" else OrderSide.SELL
+
+    stop_id = stop_price = tp_id = tp_price = None
+    for order in orders:
+        if order.side != closing_side:
+            continue
+        if order.stop_price is not None:
+            stop_id, stop_price = str(order.id), float(order.stop_price)
+        elif order.limit_price is not None:
+            tp_id, tp_price = str(order.id), float(order.limit_price)
+    return stop_id, stop_price, tp_id, tp_price
 
 
 class AlpacaTradingError(Exception):
@@ -58,6 +86,7 @@ class AlpacaTrading:
                 market_value=market_value,
                 side=side,
                 unrealized_plpc=float(p.unrealized_plpc or 0),
+                current_price=float(p.current_price) if p.current_price is not None else None,
             )
 
         if symbol in positions:
@@ -69,6 +98,7 @@ class AlpacaTrading:
                 market_value=pos.market_value,
                 side=pos.side,
                 unrealized_plpc=pos.unrealized_plpc,
+                current_price=pos.current_price,
                 stop_order_id=stop_id,
                 stop_price=stop_price,
                 take_profit_order_id=tp_id,
@@ -94,17 +124,86 @@ class AlpacaTrading:
         orders = self._client.get_orders(
             GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
         )
-        closing_side = OrderSide.BUY if position_side == "short" else OrderSide.SELL
+        return _match_bracket_legs(orders, position_side)
 
-        stop_id = stop_price = tp_id = tp_price = None
+    def list_positions_with_details(self) -> Dict[str, Position]:
+        """Full positions snapshot for position_review.py's periodic sweep:
+        every held position, including current_price and resting bracket
+        legs, fetched with one positions call + one open-orders call (rather
+        than build_snapshot()'s per-symbol N+1 lookups, which are fine there
+        since it only ever looks up the one symbol a signal is for)."""
+        positions: Dict[str, Position] = {}
+        for p in self._client.get_all_positions():
+            side = "short" if p.side == PositionSide.SHORT else "long"
+            positions[p.symbol] = Position(
+                qty=abs(float(p.qty)),
+                avg_entry_price=float(p.avg_entry_price),
+                market_value=abs(float(p.market_value or 0)),
+                side=side,
+                unrealized_plpc=float(p.unrealized_plpc or 0),
+                current_price=float(p.current_price) if p.current_price is not None else None,
+            )
+        if not positions:
+            return positions
+
+        orders = self._client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        orders_by_symbol: Dict[str, List] = {}
         for order in orders:
-            if order.side != closing_side:
+            orders_by_symbol.setdefault(order.symbol, []).append(order)
+
+        for symbol, position in positions.items():
+            stop_id, stop_price, tp_id, tp_price = _match_bracket_legs(
+                orders_by_symbol.get(symbol, []), position.side
+            )
+            positions[symbol] = Position(
+                qty=position.qty,
+                avg_entry_price=position.avg_entry_price,
+                market_value=position.market_value,
+                side=position.side,
+                unrealized_plpc=position.unrealized_plpc,
+                current_price=position.current_price,
+                stop_order_id=stop_id,
+                stop_price=stop_price,
+                take_profit_order_id=tp_id,
+                take_profit_price=tp_price,
+            )
+        return positions
+
+    def position_opened_at(self, symbol: str, side: str) -> Optional[datetime]:
+        """Best-effort 'when did the currently-open position in `symbol`
+        start' timestamp - Alpaca's Position has no entry-time field, so this
+        is derived from fill history rather than a real one.
+
+        Walks closed orders for `symbol` newest-first and returns the
+        earliest *filled* order in the current unbroken run of opening-side
+        fills (BUY for long, SELL for short), stopping as soon as a filled
+        closing-side order is hit - that's the close that started the
+        current run. Correct for this agent's normal intraday lifecycle
+        (flat -> open -> flat within the same day); if the position was
+        never fully closed since the queried history began, this may return
+        the oldest fill in that history rather than the true open time.
+        """
+        opening_side = OrderSide.SELL if side == "short" else OrderSide.BUY
+        closing_side = OrderSide.BUY if side == "short" else OrderSide.SELL
+
+        orders = self._client.get_orders(
+            GetOrdersRequest(
+                status=QueryOrderStatus.CLOSED,
+                symbols=[symbol],
+                direction=Sort.DESC,
+                limit=100,
+            )
+        )
+
+        earliest: Optional[datetime] = None
+        for order in orders:
+            if order.status != OrderStatus.FILLED or order.filled_at is None:
                 continue
-            if order.stop_price is not None:
-                stop_id, stop_price = str(order.id), float(order.stop_price)
-            elif order.limit_price is not None:
-                tp_id, tp_price = str(order.id), float(order.limit_price)
-        return stop_id, stop_price, tp_id, tp_price
+            if order.side == closing_side:
+                break
+            if order.side == opening_side:
+                earliest = order.filled_at
+        return earliest
 
     # ------------------------------------------------------------------ #
     # Execute a decided Action.

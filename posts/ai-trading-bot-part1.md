@@ -52,13 +52,40 @@ Rather than a single positive/negative score, this passes a curated taxonomy of 
 
 ### 2. Structuring entities: the `companies` table
 
-Yahoo Finance fundamentals (price, ratios, 52-week range, analyst guidance, aggregated sentiment) get cast into a strongly typed `companies` table, distributed by ticker:
+Yahoo Finance doesn't hand back one clean fact per ticker — a single fetch bundles price, valuation ratios, 52-week range, analyst guidance, and aggregated sentiment together, as a pile of loosely-typed, differently-shaped JSON. None of that is directly usable as LLM context on its own. The whole point of the `companies` table is to consolidate all of it into one strongly-typed entity per ticker, so it can later be rendered into a single coherent Markdown **company report** — the report that step 6 drops straight into the RAG prompt sent to the LLM. Structuring the entity here is what makes generating that report downstream a formality instead of a data-wrangling exercise:
 
 ```sql
+CREATE TABLE `companies` (
+  `ticker` STRING,
+  `name` STRING,
+  `current_price` FLOAT,
+  `ratios` ROW<`pe` STRING, `eps` STRING, `dividend_yield` STRING, `beta` STRING>,
+  `week_52` ROW<`high` FLOAT, `low` FLOAT>,
+  `news` ARRAY<ROW<category, confidence, content, impact_score, keywords, sentiment, source, title, url>>,
+  `sentiment` ROW<sentiment_score, confidence, news_count_7d, key_themes, risks, catalysts, sentiment_trend, /* ... */>,
+  `analyst_guidance` ARRAY<ROW<analyst_count, eps_estimate, rating, revenue_estimate, /* ... */>>,
+  PRIMARY KEY (ticker) NOT ENFORCED
+)
 DISTRIBUTED BY HASH(ticker) INTO 3 BUCKETS
+WITH ('changelog.mode' = 'append', 'key.format' = 'json-registry', 'value.format' = 'json-registry');
 ```
 
-This becomes the canonical, continuously upserted "current state of a company" — the row that the RAG lookups later in this pipeline join against.
+Two choices are doing the real work here. `PRIMARY KEY (ticker) NOT ENFORCED` makes this an *upsert* table: every fresh Yahoo Finance snapshot for `META` replaces the previous `META` row instead of appending next to it, so at any instant the table holds exactly one current row per ticker — price, ratios, sentiment trend, and analyst guidance, all under one schema, with no separate lookup tables to join at query time. `DISTRIBUTED BY HASH(ticker) INTO 3 BUCKETS` spreads that changelog across buckets by ticker, so lookups and joins by ticker parallelize instead of hammering a single partition. Together they turn `companies` into the canonical, continuously upserted "current state of a company."
+
+That covers reads *inside* Flink, but the RAG step later in this pipeline (step 6) needs to reach a company's state as a synchronous, per-ticker HTTP lookup from *inside* a streaming join, not by scanning the Flink table directly. So the same upsert changelog is also sinked, via Kafka Connect, into a CosmosDB `companies` container — one document per ticker. Sitting in front of that container is a small purpose-built REST proxy (ASP.NET Core) whose `/companies/report` endpoint renders the CosmosDB document into a Markdown company report on the fly. Flink then reads that endpoint straight back in as a REST external table:
+
+```sql
+CREATE TABLE companies_report (
+  `ticker` STRING,
+  `name`   STRING,
+  `report` STRING          -- Markdown summary of the whole document
+) WITH (
+  'connector'       = 'rest',
+  'rest.connection' = 'companies_report_connection'  -- -> https://.../companies/report
+);
+```
+
+which `KEY_SEARCH_AGG` can then join against by ticker inside a lateral join — the "Company Proxy" call step 6 relies on. The round trip — Flink table → Kafka → CosmosDB → REST proxy → Flink external table — turns a continuously upserted table into an on-demand, LLM-ready document, joinable back into the pipeline as if it were just another table.
 
 ### 3. Text to vectors, in-stream
 
@@ -111,6 +138,40 @@ The `companies` table and the `news_embedding` vector store built in steps 2 and
 **Stage 1 — assemble the context.** For that ticker, `KEY_SEARCH_AGG` performs a synchronous external table lookup — a REST call to a "Company Proxy" — to pull the company's latest fundamentals report, from *inside* a streaming join. Two separate `AI_EMBEDDING` + `VECTOR_SEARCH_AGG` calls then retrieve relevant articles from the Cosmos DB vector store built above: one query phrased around the current technical signal ("news relevant to trading around a BULLISH signal"), and a second, deliberately signal-agnostic query capped to the last three weeks — so a genuinely bad headline can't get buried just because it doesn't happen to echo today's indicators. The company report, both news digests, the technical indicators, and the forecast are all concatenated into one structured prompt.
 
 **Stage 2 — ask the model.** That prompt goes to `AI_COMPLETE` against an LLM behind a system prompt that pins the response to strict JSON: a `BUY/SELL/HOLD` signal, a stop-loss, an exit price, and a 5-day outlook. The model behind the connection is swappable — Claude, Mistral, OpenAI, or Perplexity can all sit behind the same `CREATE MODEL` definition. The result lands in a `trade_signal` topic.
+
+```mermaid
+flowchart TD
+    candle["Strongly-signaled 15m candle<br/>(quant_signal, forecast)"]
+
+    subgraph s1["Stage 1 — assemble the context"]
+        direction TB
+        ks["KEY_SEARCH_AGG"] --> proxy["Company Proxy<br/>(REST, /companies/report)"]
+        proxy --> report["Company report<br/>(fundamentals, Markdown)"]
+
+        emb1["AI_EMBEDDING<br/>'news for a BULLISH/BEARISH signal'"] --> vs1["VECTOR_SEARCH_AGG"]
+        emb2["AI_EMBEDDING<br/>signal-agnostic, last 3 weeks"] --> vs2["VECTOR_SEARCH_AGG"]
+        vs1 --> vecstore[("Cosmos DB<br/>news_embedding<br/>vector store")]
+        vs2 --> vecstore
+        vecstore --> news1["Signal-relevant news digest"]
+        vecstore --> news2["Signal-agnostic news digest"]
+
+        report --> ctx["context =<br/>report + news1 + news2<br/>+ indicators + forecast"]
+        news1 --> ctx
+        news2 --> ctx
+    end
+
+    subgraph s2["Stage 2 — ask the model"]
+        direction TB
+        complete["AI_COMPLETE<br/>(Claude / Mistral / OpenAI / Perplexity)"]
+    end
+
+    signal["trade_signal topic<br/>BUY/SELL/HOLD, stop-loss, exit price, 5d outlook"]
+
+    candle --> ks
+    candle --> emb1
+    candle --> emb2
+    ctx --> complete --> signal
+```
 
 ### What actually comes out the other end
 

@@ -78,6 +78,29 @@ class WorkerConfig:
 
     poll_timeout_s: float
 
+    # Periodic position review (see position_review.py): runs on a timer in
+    # a background thread, independent of incoming Kafka signals.
+    position_sweep_interval_s: float
+
+    # Rule 1: once a long's unrealized P&L clears trailing_stop_trigger_pct,
+    # jump its stop straight to at least breakeven (first lock-in). From
+    # then on, each sweep eases the stop trailing_stop_step_pct of the way
+    # from where it last rested toward current_price * (1 - trailing_stop_trail_pct),
+    # rather than jumping straight to that target - i.e. the new candidate
+    # is always computed from the last resting stop, not from price alone.
+    trailing_stop_enabled: bool
+    trailing_stop_trigger_pct: float
+    trailing_stop_trail_pct: float
+    trailing_stop_step_pct: float
+
+    # Rule 2: this is an intraday agent, so a position open at least
+    # stale_position_max_age_minutes with unrealized P&L within
+    # stale_position_flat_band_pct of flat is stuck capital - close it
+    # instead of leaving it to tie up exposure/risk budget.
+    stale_position_enabled: bool
+    stale_position_max_age_minutes: float
+    stale_position_flat_band_pct: float
+
     @classmethod
     def from_env(cls) -> "WorkerConfig":
         return cls(
@@ -105,4 +128,12 @@ class WorkerConfig:
             portfolio_reorient_enabled=_env_bool("PORTFOLIO_REORIENT_ENABLED", True),
             reorient_min_edge_pct=_env_float("REORIENT_MIN_EDGE_PCT", 0.05),
             poll_timeout_s=_env_float("POLL_TIMEOUT_S", 5.0),
+            position_sweep_interval_s=_env_float("POSITION_SWEEP_INTERVAL_S", 300.0),
+            trailing_stop_enabled=_env_bool("TRAILING_STOP_ENABLED", True),
+            trailing_stop_trigger_pct=_env_float("TRAILING_STOP_TRIGGER_PCT", 0.05),
+            trailing_stop_trail_pct=_env_float("TRAILING_STOP_TRAIL_PCT", 0.02),
+            trailing_stop_step_pct=_env_float("TRAILING_STOP_STEP_PCT", 0.5),
+            stale_position_enabled=_env_bool("STALE_POSITION_ENABLED", True),
+            stale_position_max_age_minutes=_env_float("STALE_POSITION_MAX_AGE_MINUTES", 120.0),
+            stale_position_flat_band_pct=_env_float("STALE_POSITION_FLAT_BAND_PCT", 0.005),
         )

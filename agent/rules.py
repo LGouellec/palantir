@@ -28,6 +28,10 @@ class Position:
     # (positive means profitable) - used to pick the "worst position" when
     # reorienting the portfolio for a more profitable signal.
     unrealized_plpc: float = 0.0
+    # Live market price - only populated by list_positions_with_details()
+    # (position_review.py's sweep), not by build_snapshot()'s per-signal
+    # path, which never needs it.
+    current_price: Optional[float] = None
     # Currently resting bracket legs for this position, if any.
     stop_order_id: Optional[str] = None
     stop_price: Optional[float] = None
