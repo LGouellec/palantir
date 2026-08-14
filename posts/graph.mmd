@@ -1,0 +1,31 @@
+flowchart TD
+    candle["Strongly-signaled 15m candle<br/>(quant_signal, forecast)"]
+
+    subgraph s1["Stage 1 — assemble the context"]
+        direction TB
+        ks["KEY_SEARCH_AGG"] --> proxy["Company Proxy<br/>(REST, /companies/report)"]
+        proxy --> report["Company report<br/>(fundamentals, Markdown)"]
+
+        emb1["AI_EMBEDDING<br/>'news for a BULLISH/BEARISH signal'"] --> vs1["VECTOR_SEARCH_AGG"]
+        emb2["AI_EMBEDDING<br/>signal-agnostic, last 3 weeks"] --> vs2["VECTOR_SEARCH_AGG"]
+        vs1 --> vecstore[("Cosmos DB<br/>news_embedding<br/>vector store")]
+        vs2 --> vecstore
+        vecstore --> news1["Signal-relevant news digest"]
+        vecstore --> news2["Signal-agnostic news digest"]
+
+        report --> ctx["context =<br/>report + news1 + news2<br/>+ indicators + forecast"]
+        news1 --> ctx
+        news2 --> ctx
+    end
+
+    subgraph s2["Stage 2 — ask the model"]
+        direction TB
+        complete["AI_COMPLETE<br/>(Claude / Mistral / OpenAI / Perplexity)"]
+    end
+
+    signal["trade_signal topic<br/>BUY/SELL/HOLD, stop-loss, exit price, 5d outlook"]
+
+    candle --> ks
+    candle --> emb1
+    candle --> emb2
+    ctx --> complete --> signal

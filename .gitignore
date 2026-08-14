@@ -1,5 +1,9 @@
 infra/
 kafka_config.properties
+dashboard/data/
+*.db
+*.db-wal
+*.db-shm
 TODO.md 
 chrome/
 chrome_investing/
