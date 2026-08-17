@@ -21,6 +21,7 @@ from alpaca.trading.enums import (
     QueryOrderStatus,
     TimeInForce,
 )
+from alpaca.trading.models import Order
 from alpaca.trading.requests import (
     GetOrdersRequest,
     MarketOrderRequest,
@@ -28,6 +29,7 @@ from alpaca.trading.requests import (
     StopLossRequest,
     TakeProfitRequest,
 )
+from pydantic import TypeAdapter
 
 from rules import Action, AccountSnapshot, Position
 
@@ -114,16 +116,62 @@ class AlpacaTrading:
             market_open=self.is_market_open(),
         )
 
+    def held_orders_for_symbols(self, symbols: List[str]) -> Dict[str, List[Order]]:
+        """All status=held orders - a bracket's stop-loss/take-profit legs
+        rest in this status once their entry fills, which is a distinct
+        status from new/accepted and isn't matched by GetOrdersRequest's
+        status=open/closed/all (its status field is a client-side enum
+        restricted to those three - "held" isn't one of them, even though
+        the API itself accepts it as a filter value). Goes around that by
+        calling the underlying authenticated GET directly with a raw params
+        dict instead of a typed GetOrdersRequest, then deserializing the
+        response the same way TradingClient.get_orders() does internally.
+        Grouped by symbol; empty dict if `symbols` is empty."""
+        if not symbols:
+            return {}
+
+        response = self._client.get("/orders", {"status": "held", "symbols": ",".join(symbols), "limit": 500})
+        orders = TypeAdapter(List[Order]).validate_python(response)
+
+        grouped: Dict[str, List[Order]] = {}
+        for order in orders:
+            grouped.setdefault(order.symbol, []).append(order)
+        return grouped
+
+    def open_orders_for_symbols(self, symbols: List[str]) -> Dict[str, List[Order]]:
+        """All status=open orders, grouped by symbol - a bracket's
+        take-profit (limit) leg genuinely rests on the book once its entry
+        fills, so it shows up here, unlike the stop-loss leg (a conditional
+        order Alpaca monitors rather than rests, sitting in status=held -
+        see held_orders_for_symbols) which status=open does not match."""
+        if not symbols:
+            return {}
+
+        orders = self._client.get_orders(
+            GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=symbols, nested=False, limit=500)
+        )
+        grouped: Dict[str, List[Order]] = {}
+        for order in orders:
+            grouped.setdefault(order.symbol, []).append(order)
+        return grouped
+
+    def resting_bracket_orders_for_symbols(self, symbols: List[str]) -> Dict[str, List[Order]]:
+        """Resting bracket legs for `symbols`, merged from the two queries
+        above since a bracket's stop-loss and take-profit legs sit in
+        different statuses (held vs. open) and neither query alone sees
+        both."""
+        held = self.held_orders_for_symbols(symbols)
+        open_orders = self.open_orders_for_symbols(symbols)
+        return {symbol: held.get(symbol, []) + open_orders.get(symbol, []) for symbol in symbols}
+
     def _open_bracket_legs(
         self, symbol: str, position_side: str = "long"
     ) -> Tuple[Optional[str], Optional[float], Optional[str], Optional[float]]:
         """Find the resting stop-loss / take-profit legs protecting a
-        position: the two open orders for this symbol on the side that
+        position: the resting orders for this symbol on the side that
         *closes* it (SELL for a long, BUY for a short) - one with a
         stop_price, one with a limit_price."""
-        orders = self._client.get_orders(
-            GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
-        )
+        orders = self.resting_bracket_orders_for_symbols([symbol]).get(symbol, [])
         return _match_bracket_legs(orders, position_side)
 
     def list_positions_with_details(self) -> Dict[str, Position]:
@@ -146,10 +194,7 @@ class AlpacaTrading:
         if not positions:
             return positions
 
-        orders = self._client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
-        orders_by_symbol: Dict[str, List] = {}
-        for order in orders:
-            orders_by_symbol.setdefault(order.symbol, []).append(order)
+        orders_by_symbol = self.resting_bracket_orders_for_symbols(list(positions.keys()))
 
         for symbol, position in positions.items():
             stop_id, stop_price, tp_id, tp_price = _match_bracket_legs(
@@ -273,11 +318,8 @@ class AlpacaTrading:
 
     def _close_position(self, symbol: str) -> None:
         # Cancel any resting bracket legs first so they don't race the close
-        # (an open stop/take-profit leg still reserves the shares it covers).
-        orders = self._client.get_orders(
-            GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
-        )
-        for order in orders:
+        # (a resting stop/take-profit leg still reserves the shares it covers).
+        for order in self.resting_bracket_orders_for_symbols([symbol]).get(symbol, []):
             self._client.cancel_order_by_id(order.id)
 
         closed = self._client.close_position(symbol)
