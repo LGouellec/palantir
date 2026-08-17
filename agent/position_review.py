@@ -56,6 +56,8 @@ def decide_trailing_stop(symbol: str, position: Position, cfg) -> Optional[Actio
         # current_price alone.
         desired_stop = position.stop_price + (trail_target - position.stop_price) * cfg.trailing_stop_step_pct
 
+    desired_stop = round(desired_stop, 2)
+
     if desired_stop <= position.stop_price:
         return None
 
