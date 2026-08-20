@@ -122,7 +122,13 @@ def main() -> int:
     creds = resolve_credentials()
     logger.info("🔑 Credentials resolved (%s)", creds.masked())
 
-    trading = AlpacaTrading(creds.api_key, creds.api_secret, paper=not cfg.trading_live)
+    trading = AlpacaTrading(
+        creds.api_key,
+        creds.api_secret,
+        paper=not cfg.trading_live,
+        close_fill_timeout_s=cfg.close_fill_timeout_s,
+        close_fill_poll_interval_s=cfg.close_fill_poll_interval_s,
+    )
     consumer = TradeSignalConsumer(cfg)
 
     sweep_thread = threading.Thread(

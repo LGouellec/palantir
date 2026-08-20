@@ -76,6 +76,15 @@ class WorkerConfig:
     portfolio_reorient_enabled: bool
     reorient_min_edge_pct: float
 
+    # After submitting a CLOSE_POSITION order, block until it reaches a
+    # terminal status (poll every close_fill_poll_interval_s, give up after
+    # close_fill_timeout_s) before returning - so a portfolio-reorientation
+    # retry re-decides its follow-up signal against a snapshot that actually
+    # reflects the close, instead of racing the fill and picking the same
+    # position to close again.
+    close_fill_timeout_s: float
+    close_fill_poll_interval_s: float
+
     poll_timeout_s: float
 
     # Periodic position review (see position_review.py): runs on a timer in
@@ -127,6 +136,8 @@ class WorkerConfig:
             ),
             portfolio_reorient_enabled=_env_bool("PORTFOLIO_REORIENT_ENABLED", True),
             reorient_min_edge_pct=_env_float("REORIENT_MIN_EDGE_PCT", 0.05),
+            close_fill_timeout_s=_env_float("CLOSE_FILL_TIMEOUT_S", 10.0),
+            close_fill_poll_interval_s=_env_float("CLOSE_FILL_POLL_INTERVAL_S", 0.5),
             poll_timeout_s=_env_float("POLL_TIMEOUT_S", 5.0),
             position_sweep_interval_s=_env_float("POSITION_SWEEP_INTERVAL_S", 300.0),
             trailing_stop_enabled=_env_bool("TRAILING_STOP_ENABLED", True),

@@ -1,6 +1,6 @@
 """Standalone diagnostic: fetch every filled Alpaca order and export it to
 CSV, sorted by symbol then fill time, plus a second CSV of matched trades
-using the exact same bracket/replacement-lineage logic as the dashboard
+using the exact same FIFO quantity-reconciliation logic as the dashboard
 (pnl.py) — so this is a way to eyeball the dashboard's own numbers up close,
 not an independent cross-check.
 
@@ -107,7 +107,7 @@ def main() -> None:
     df_all["filled_at"] = pd.to_datetime(df_all["filled_at"], utc=True)
     df_all["submitted_at"] = pd.to_datetime(df_all["submitted_at"], utc=True)
 
-    df_filled = df_all[df_all["status"] == "filled"].copy()
+    df_filled = df_all[(df_all["status"] == "filled") | ((df_all["status"] == "canceled") & (df_all["filled_qty"] > 0))].copy()
     df_filled["cost_op"] = df_filled["filled_qty"] * df_filled["filled_avg_price"] * df_filled["side"].map(
         {"buy": -1, "sell": 1}
     )
@@ -115,8 +115,8 @@ def main() -> None:
     df_filled.to_csv(out_path, index=False)
     print(f"Wrote {len(df_filled)} filled orders to {out_path}")
 
-    # Same bracket/replacement-lineage matching the dashboard uses (pnl.py),
-    # not an independent FIFO reconstruction, so trade counts agree with the app.
+    # Same FIFO quantity-reconciliation matching the dashboard uses (pnl.py),
+    # so trade counts and total pnl agree with the app.
     trades_df = compute_trades(df_all)
 
     trades_path = Path(out_path).with_name(Path(out_path).stem + "_trades.csv")

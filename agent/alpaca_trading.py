@@ -7,6 +7,7 @@ over, and executes the Action rules.py decides on. Bracket orders
 protection lives on Alpaca's servers, not in this process's memory.
 """
 import logging
+import time
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -59,9 +60,31 @@ class AlpacaTradingError(Exception):
     pass
 
 
+# Terminal order statuses _close_position waits for after submitting a
+# liquidating order - FILLED is the only one that actually freed the
+# exposure/position a portfolio-reorientation retry is counting on.
+_CLOSE_ORDER_TERMINAL_STATUSES = {
+    OrderStatus.FILLED,
+    OrderStatus.CANCELED,
+    OrderStatus.EXPIRED,
+    OrderStatus.REJECTED,
+    OrderStatus.STOPPED,
+    OrderStatus.SUSPENDED,
+}
+
+
 class AlpacaTrading:
-    def __init__(self, api_key: str, api_secret: str, paper: bool):
+    def __init__(
+        self,
+        api_key: str,
+        api_secret: str,
+        paper: bool,
+        close_fill_timeout_s: float = 10.0,
+        close_fill_poll_interval_s: float = 0.5,
+    ):
         self._client = TradingClient(api_key, api_secret, paper=paper)
+        self._close_fill_timeout_s = close_fill_timeout_s
+        self._close_fill_poll_interval_s = close_fill_poll_interval_s
         logger.info("🦙 Alpaca trading client ready (paper=%s)", paper)
 
     # ------------------------------------------------------------------ #
@@ -275,6 +298,7 @@ class AlpacaTrading:
             symbol=action.symbol,
             qty=action.qty,
             side=side,
+            extended_hours=True,
             time_in_force=TimeInForce.GTC,
             order_class=OrderClass.BRACKET,
             take_profit=TakeProfitRequest(limit_price=action.take_profit),
@@ -324,3 +348,31 @@ class AlpacaTrading:
 
         closed = self._client.close_position(symbol)
         logger.info("✅ CLOSE_POSITION %s order_id=%s", symbol, closed.id)
+        self._wait_for_order_terminal(str(closed.id), symbol)
+
+    def _wait_for_order_terminal(self, order_id: str, symbol: str) -> None:
+        """Block until the closing order reaches a terminal status, so a
+        caller that re-snapshots the account right after execute() returns -
+        e.g. runner.py's portfolio-reorientation retry - sees the position
+        actually gone instead of racing the fill and re-picking it as the
+        worst position all over again."""
+        deadline = time.monotonic() + self._close_fill_timeout_s
+        while time.monotonic() < deadline:
+            order = self._client.get_order_by_id(order_id)
+            if order.status in _CLOSE_ORDER_TERMINAL_STATUSES:
+                if order.status != OrderStatus.FILLED:
+                    logger.warning(
+                        "⚠️  CLOSE_POSITION %s order_id=%s ended in status=%s (not filled)",
+                        symbol,
+                        order_id,
+                        order.status,
+                    )
+                return
+            time.sleep(self._close_fill_poll_interval_s)
+
+        logger.warning(
+            "⚠️  CLOSE_POSITION %s order_id=%s did not reach a terminal status within %.1fs; proceeding anyway",
+            symbol,
+            order_id,
+            self._close_fill_timeout_s,
+        )
