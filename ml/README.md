@@ -1,0 +1,3 @@
+- Python 3.12
+- pip install yfinance pandas numpy matplotlib pandas_ta scikit-learn
+- pip install ipython

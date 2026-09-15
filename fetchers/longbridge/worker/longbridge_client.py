@@ -124,7 +124,7 @@ class LongbridgeShardClient:
     # Lifecycle
     # ------------------------------------------------------------------ #
     def start(self, symbols: List[str]) -> None:
-        from longport.openapi import Config, QuoteContext, SubType
+        from longbridge.openapi import Config, QuoteContext, SubType
 
         if not symbols:
             logger.warning("⚠️  Shard has no symbols to subscribe to; idling")
@@ -138,13 +138,14 @@ class LongbridgeShardClient:
         if not sub_types:
             raise ValueError("At least one of SUBSCRIBE_QUOTE / SUBSCRIBE_DEPTH must be enabled")
 
-        config = Config(
+        config = Config.from_apikey(
             app_key=self._app_key,
             app_secret=self._app_secret,
             access_token=self._access_token,
         )
-        self._ctx = QuoteContext(config)
 
+        self._ctx = QuoteContext(config)
+        
         if self._subscribe_quote:
             self._ctx.set_on_quote(self._on_quote)
         if self._subscribe_depth:
