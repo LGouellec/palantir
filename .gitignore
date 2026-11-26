@@ -81,3 +81,8 @@ htmlcov/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Java / Maven
+target/
+
+secret.key
